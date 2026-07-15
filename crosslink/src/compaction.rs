@@ -977,12 +977,10 @@ fn apply_lock_event(
         );
         changed_locks.insert(issue_display_id);
     } else {
-        // Release — only if held by this agent
-        if let Some(existing) = state.locks.get(&issue_display_id) {
-            if existing.agent_id == envelope.agent_id {
-                state.locks.remove(&issue_display_id);
-                changed_locks.insert(issue_display_id);
-            }
+        // Release — allow any agent to release (enables steal/force-release in V3)
+        if state.locks.contains_key(&issue_display_id) {
+            state.locks.remove(&issue_display_id);
+            changed_locks.insert(issue_display_id);
         }
     }
 }
@@ -2329,8 +2327,8 @@ mod tests {
     // ── Lock claim / release / contention tests ─────────────────────
 
     #[test]
-    fn test_lock_release_by_non_holder_ignored() {
-        // Agent B cannot release a lock held by Agent A
+    fn test_lock_release_by_non_holder_allowed() {
+        // Agent B can release a lock held by Agent A (steal/force-release)
         let dir = tempfile::tempdir().unwrap();
         let cache_dir = dir.path();
         setup_cache(cache_dir);
@@ -2363,9 +2361,8 @@ mod tests {
         compact_t(cache_dir, "agent-a", true).unwrap();
 
         let state = read_checkpoint(cache_dir).unwrap();
-        // Lock should still be held by agent-a since agent-b cannot release it
-        assert_eq!(state.locks[&1].agent_id, "agent-a");
-        assert!(cache_dir.join("locks/1.json").exists());
+        // Lock should be released even though agent-b is not the holder
+        assert!(!state.locks.contains_key(&1));
     }
 
     #[test]

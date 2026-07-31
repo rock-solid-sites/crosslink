@@ -78,3 +78,5 @@ dashboard-bootstrap@crosslink ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKAFUqDzWVSnKz
 driver@crosslink ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKo+flEdaJYO8NPs2cLlm7FqczNhZVbMbKNZfq5/HUnw doll@dollspace
 # approved by doll at 2026-04-21 23:32:28 UTC
 jus4@crosslink ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHIz6j+6yCnl/ihv2NE3I1ZN1iLYXhRWTVixqK8cB/Eg crosslink-agent:jus4@dollspace
+# self-registered as workspace signing key at 2026-07-31 19:35:45 UTC
+dY7W-9AES-verify-the-13-files-committed-under-issue-792-commit@crosslink ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIObsqPENLWUU8FTGnssVd5+9MELmYKkXZ6YPcYAmehbC crosslink-agent:dY7W-9AES-verify-the-13-files-committed-under-issue-792-commit@IT3812

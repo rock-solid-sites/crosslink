@@ -146,8 +146,8 @@ fn test_build_prompt_contains_essentials() {
         doc_path: None,
         skip_permissions: false,
         permission_mode: None,
-            agent_binary: "claude".to_string(),
-            agent_type: None,
+        agent_binary: "claude".to_string(),
+        agent_type: None,
     };
     let prompt = build_prompt(&opts, 42, "feature/add-retry-logic", &conventions);
 
@@ -181,8 +181,8 @@ fn test_build_prompt_ci_verification() {
         doc_path: None,
         skip_permissions: false,
         permission_mode: None,
-            agent_binary: "claude".to_string(),
-            agent_type: None,
+        agent_binary: "claude".to_string(),
+        agent_type: None,
     };
     let prompt = build_prompt(&opts, 1, "feature/test-ci", &conventions);
 
@@ -213,8 +213,8 @@ fn test_build_prompt_thorough_verification() {
         doc_path: None,
         skip_permissions: false,
         permission_mode: None,
-            agent_binary: "claude".to_string(),
-            agent_type: None,
+        agent_binary: "claude".to_string(),
+        agent_type: None,
     };
     let prompt = build_prompt(&opts, 1, "feature/test-thorough", &conventions);
 
@@ -895,8 +895,8 @@ fn test_build_prompt_local_has_no_ci_or_adversarial() {
         doc_path: None,
         skip_permissions: false,
         permission_mode: None,
-            agent_binary: "claude".to_string(),
-            agent_type: None,
+        agent_binary: "claude".to_string(),
+        agent_type: None,
     };
     let prompt = build_prompt(&opts, 1, "feature/test-local", &conventions);
 
@@ -927,8 +927,8 @@ fn test_build_prompt_contains_blocked_actions() {
         doc_path: None,
         skip_permissions: false,
         permission_mode: None,
-            agent_binary: "claude".to_string(),
-            agent_type: None,
+        agent_binary: "claude".to_string(),
+        agent_type: None,
     };
     let prompt = build_prompt(&opts, 1, "feature/test", &conventions);
 
@@ -960,8 +960,8 @@ fn test_build_prompt_embeds_issue_id_in_instructions() {
         doc_path: None,
         skip_permissions: false,
         permission_mode: None,
-            agent_binary: "claude".to_string(),
-            agent_type: None,
+        agent_binary: "claude".to_string(),
+        agent_type: None,
     };
     let prompt = build_prompt(&opts, 999, "feature/test-refs", &conventions);
 
@@ -993,8 +993,8 @@ fn test_build_prompt_empty_conventions_uses_generic_instructions() {
         doc_path: None,
         skip_permissions: false,
         permission_mode: None,
-            agent_binary: "claude".to_string(),
-            agent_type: None,
+        agent_binary: "claude".to_string(),
+        agent_type: None,
     };
     let prompt = build_prompt(&opts, 1, "feature/test-generic", &conventions);
 
@@ -1038,8 +1038,8 @@ fn test_build_prompt_with_design_doc() {
         doc_path: None,
         skip_permissions: false,
         permission_mode: None,
-            agent_binary: "claude".to_string(),
-            agent_type: None,
+        agent_binary: "claude".to_string(),
+        agent_type: None,
     };
     let prompt = build_prompt(&opts, 1, "feature/batch-retry", &conventions);
 
@@ -1186,8 +1186,8 @@ fn test_build_prompt_with_design_doc_open_questions() {
         doc_path: None,
         skip_permissions: false,
         permission_mode: None,
-            agent_binary: "claude".to_string(),
-            agent_type: None,
+        agent_binary: "claude".to_string(),
+        agent_type: None,
     };
     let prompt = build_prompt(&opts, 1, "feature/auth", &conventions);
 
@@ -1360,8 +1360,8 @@ fn test_build_prompt_with_criteria_includes_validation() {
         doc_path: None,
         skip_permissions: false,
         permission_mode: None,
-            agent_binary: "claude".to_string(),
-            agent_type: None,
+        agent_binary: "claude".to_string(),
+        agent_type: None,
     };
     let prompt = build_prompt(&opts, 1, "feature/test", &conventions);
     assert!(prompt.contains("Spec Validation"));
@@ -1403,8 +1403,8 @@ fn test_build_prompt_without_criteria_no_validation() {
         doc_path: None,
         skip_permissions: false,
         permission_mode: None,
-            agent_binary: "claude".to_string(),
-            agent_type: None,
+        agent_binary: "claude".to_string(),
+        agent_type: None,
     };
     let prompt = build_prompt(&opts, 1, "feature/test", &conventions);
     assert!(!prompt.contains("Spec Validation"));
@@ -1443,8 +1443,8 @@ fn test_build_prompt_validation_ordering() {
         doc_path: None,
         skip_permissions: false,
         permission_mode: None,
-            agent_binary: "claude".to_string(),
-            agent_type: None,
+        agent_binary: "claude".to_string(),
+        agent_type: None,
     };
     let prompt = build_prompt(&opts, 1, "feature/test", &conventions);
     let test_pos = prompt.find("Run tests").expect("should have test section");
@@ -2544,8 +2544,8 @@ fn test_build_prompt_contains_report_json_schema() {
         doc_path: Some("test.md"),
         skip_permissions: false,
         permission_mode: None,
-            agent_binary: "claude".to_string(),
-            agent_type: None,
+        agent_binary: "claude".to_string(),
+        agent_type: None,
     };
     let prompt = build_prompt(&opts, 1, "feature/test", &conventions);
 
@@ -2594,8 +2594,8 @@ fn test_build_prompt_contains_validation_section() {
         doc_path: Some("test.md"),
         skip_permissions: false,
         permission_mode: None,
-            agent_binary: "claude".to_string(),
-            agent_type: None,
+        agent_binary: "claude".to_string(),
+        agent_type: None,
     };
     let prompt = build_prompt(&opts, 1, "feature/validated", &conventions);
 

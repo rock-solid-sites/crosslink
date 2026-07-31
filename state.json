@@ -1,6 +1,6 @@
 {
-  "next_display_id": 787,
-  "next_comment_id": 1120,
+  "next_display_id": 796,
+  "next_comment_id": 1138,
   "display_id_map": {
     "00a365a3-7b31-465a-aced-4f1e39c68f8b": 118,
     "01b74b94-82e0-4bda-9bed-7eace0292544": 70,
@@ -69,6 +69,7 @@
     "16b27950-f024-49e7-b71e-c035b46d410c": 540,
     "16fa2676-3325-47b4-a082-5269b584bef5": 719,
     "17e25056-f48a-43c4-a99a-f73b75b8cfb6": 323,
+    "180413c1-2a42-42f2-9b3d-6bdb54d093a7": 790,
     "1858b5a3-e417-4f62-80f0-a810890a6e43": 61,
     "18742457-6dc0-426d-9411-f09b9ad7f48e": 639,
     "18fb7c59-2d4f-4d4a-833a-6df03ad8d3d5": 21,
@@ -328,6 +329,7 @@
     "68a57297-6f8e-480c-80b2-c631ab26ba70": 726,
     "68a74a37-9c46-4a44-91c0-acbc340ba0b8": 310,
     "68e47248-bfb7-4d2f-8c76-d9af050649b1": 174,
+    "698f1be6-0bfb-412d-b3d7-d9b357d5eff5": 791,
     "69fa7513-0679-4bcb-bbe1-5edc7b4d82c4": 549,
     "6a191e74-1920-43b2-b772-41b969f660c1": 718,
     "6a234437-9a94-43cb-aa81-745153d057f7": 334,
@@ -394,6 +396,7 @@
     "7d8298ae-b910-43bb-b781-8bc2c9a5de79": 73,
     "7d886bb5-f874-4672-b1fd-b21a2ce53548": 625,
     "7df97724-6519-431d-a118-e87fbc29200f": 284,
+    "7e353d32-e62d-4e53-bfdf-4842ce2877d9": 787,
     "7e600bc9-7c9b-4c49-bceb-b2136d384e8f": 576,
     "7f2d4cbe-d193-48e5-91b3-1152736b514e": 660,
     "7f7a6289-9c3f-47f0-9152-2624876037f8": 145,
@@ -403,6 +406,7 @@
     "80b4dd77-03a3-49cd-8d56-43d4f6a3746c": 283,
     "80c53e44-4daa-44df-ae2e-a953397c1c50": 297,
     "80ca5894-903f-4eac-93d2-867b5f565b3d": 119,
+    "81255937-b6fe-4db1-8bff-25d807f0da56": 795,
     "813b0a8b-513a-4a08-ac63-79122e440868": 701,
     "8153db58-5153-4e55-9c08-5ef0610cc52d": 224,
     "8200e701-de4c-42d2-bdab-d4c0ddd0dbd3": 81,
@@ -468,6 +472,7 @@
     "9448fd71-bc44-4152-8299-367abaca496f": 722,
     "9460fd4a-7e67-49ac-830e-0be55597c9b5": 541,
     "94bda4b1-1175-436b-9b0c-899fa3567ca6": 36,
+    "94dc4260-75e1-4e89-b057-3a93af7d91d1": 793,
     "963050a6-7b16-447a-a2a2-d3e9b52d35e9": 772,
     "963c1073-1ada-4893-ade7-97130da2c405": 476,
     "964693d1-765b-4a66-9906-87731d50f3e2": 167,
@@ -536,6 +541,7 @@
     "aaf9e485-5473-42c3-82ef-3998175213ab": 272,
     "ab3145e2-a735-480c-93fc-6840aef1168e": 785,
     "ab34350f-d664-4017-b3e5-0d10fe5014b2": 668,
+    "ac1e9b26-5cac-446c-9abf-efecc22b978b": 792,
     "ac447e21-d601-4b4a-9cb6-4cc32bd6204e": 483,
     "ac6270f0-2af9-4f84-b557-5457d465c7dd": 103,
     "ac98c70e-3b2a-46a2-b117-6a28710aee70": 436,
@@ -679,6 +685,7 @@
     "db1fc1d4-322d-4fe1-ba6d-e03dd1493118": 371,
     "db8e3858-2be3-498c-af4a-4c1a11347c47": 403,
     "dbd2d560-8b18-4f6e-8fb3-cd88405228e5": 270,
+    "dbef06e3-65a4-4731-a38b-b331697e7528": 788,
     "dc1f4872-07f8-4622-aa7f-3429501b0391": 120,
     "dd1202c5-651d-4596-b25d-65378d4e1812": 739,
     "dee26255-71db-4be3-aace-6375cbc837ee": 100,
@@ -689,6 +696,7 @@
     "e0584461-63fb-4412-b266-0c06d4c1cc03": 781,
     "e0b6a490-1afc-415e-8b19-9ba77f2771b1": 327,
     "e0b6a6ea-a5d9-4607-8d7d-c9f42e4d12da": 697,
+    "e0ca87b3-7aa6-4f50-9057-cd034556bd88": 789,
     "e0dea756-5442-4bf4-be76-142b175d7a54": 296,
     "e1083aed-7514-49c6-b765-2fa2edd367e7": 744,
     "e1a967dd-965b-4e1f-88a3-4914cfb1f536": 266,
@@ -719,6 +727,7 @@
     "ea7ce593-a9a4-4b2f-bc5c-e69ed0d9f0f5": 771,
     "ea8b2b52-86c6-47df-a85d-628869b5706c": 168,
     "eade6a06-6929-4fb6-bce5-f7881f5c263c": 349,
+    "ec6a5aea-9c06-46ad-a25f-771f7fc03384": 794,
     "ec842d71-e9d1-4585-bd1d-8d4fcf184e84": 582,
     "eca5bd4a-f28c-4866-853d-17383616b581": 246,
     "ecaea02f-0a45-464a-a50e-cf6e93f3bebb": 192,
@@ -932,6 +941,18 @@
     "786": {
       "agent_id": "dashboard-bootstrap",
       "claimed_at": "2026-06-25T06:57:09.279557146Z"
+    },
+    "789": {
+      "agent_id": "driver",
+      "claimed_at": "2026-07-15T10:25:59.248865664Z"
+    },
+    "790": {
+      "agent_id": "driver",
+      "claimed_at": "2026-07-15T10:27:20.277335622Z"
+    },
+    "792": {
+      "agent_id": "dY7W-9AES-verify-the-13-files-committed-under-issue-792-commit",
+      "claimed_at": "2026-07-31T19:36:04.186730618Z"
     }
   },
   "issues": {
@@ -2870,6 +2891,19 @@
           "signature": "U1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAgoAVSoPNZVKcrMVLDFcYmdht4ApGHpHxrnyaIXR6QJBMAAAARY3Jvc3NsaW5rLWNvbW1lbnQAAAAAAAAABnNoYTUxMgAAAFMAAAALc3NoLWVkMjU1MTkAAABAEUz8YGKHQFQ+666O/3bHyoDbEyLJBdBEFAZ2+jDhKGqDhimK+l6R/zaKVzG/+610NXmwIgHEIALV88iaYneHAQ=="
         }
       }
+    },
+    "180413c1-2a42-42f2-9b3d-6bdb54d093a7": {
+      "uuid": "180413c1-2a42-42f2-9b3d-6bdb54d093a7",
+      "display_id": 790,
+      "title": "Fix V3 lock protocol: release and steal silently fail",
+      "status": "open",
+      "priority": "high",
+      "created_by": "anon-2e6f9fa2",
+      "created_at": "2026-07-15T10:24:02.426384444Z",
+      "updated_at": "2026-07-15T10:24:04.280158479Z",
+      "labels": [
+        "bug"
+      ]
     },
     "1858b5a3-e417-4f62-80f0-a810890a6e43": {
       "uuid": "1858b5a3-e417-4f62-80f0-a810890a6e43",
@@ -10848,6 +10882,16 @@
         }
       }
     },
+    "698f1be6-0bfb-412d-b3d7-d9b357d5eff5": {
+      "uuid": "698f1be6-0bfb-412d-b3d7-d9b357d5eff5",
+      "display_id": 791,
+      "title": "Fix V3 lock protocol: release and steal silently fail",
+      "status": "open",
+      "priority": "high",
+      "created_by": "driver",
+      "created_at": "2026-07-15T10:27:12.805368839Z",
+      "updated_at": "2026-07-15T10:27:12.805368839Z"
+    },
     "69fa7513-0679-4bcb-bbe1-5edc7b4d82c4": {
       "uuid": "69fa7513-0679-4bcb-bbe1-5edc7b4d82c4",
       "display_id": 549,
@@ -12977,6 +13021,19 @@
         }
       }
     },
+    "7e353d32-e62d-4e53-bfdf-4842ce2877d9": {
+      "uuid": "7e353d32-e62d-4e53-bfdf-4842ce2877d9",
+      "display_id": 787,
+      "title": "Make Crosslink model- and provider-agnostic with configurable agent binary, provider-agnostic pricing, sentinel model override, and exhaustion triage",
+      "status": "open",
+      "priority": "high",
+      "created_by": "anon-2e6f9fa2",
+      "created_at": "2026-07-11T06:34:02.725067031Z",
+      "updated_at": "2026-07-11T06:34:04.123247120Z",
+      "labels": [
+        "feature"
+      ]
+    },
     "7e600bc9-7c9b-4c49-bceb-b2136d384e8f": {
       "uuid": "7e600bc9-7c9b-4c49-bceb-b2136d384e8f",
       "display_id": 576,
@@ -13139,6 +13196,16 @@
       "created_at": "2026-03-03T01:15:10.521483Z",
       "updated_at": "2026-03-10T03:18:17.125760Z",
       "closed_at": "2026-03-10T03:18:17.125760Z"
+    },
+    "81255937-b6fe-4db1-8bff-25d807f0da56": {
+      "uuid": "81255937-b6fe-4db1-8bff-25d807f0da56",
+      "display_id": 795,
+      "title": "tracker_remote=fork verification",
+      "status": "open",
+      "priority": "low",
+      "created_by": "driver",
+      "created_at": "2026-07-31T22:25:29.243571867Z",
+      "updated_at": "2026-07-31T22:25:29.243571867Z"
     },
     "813b0a8b-513a-4a08-ac63-79122e440868": {
       "uuid": "813b0a8b-513a-4a08-ac63-79122e440868",
@@ -15031,6 +15098,147 @@
           "kind": "result",
           "signed_by": "SHA256:k0PWejDto36xlyTpXwVGHDbRl7ZIvkCkaAU0ioOEhRU",
           "signature": "U1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAgubz4yfS1wSDvxmlSGQNKwSPYUq0ktzwpVKHmFR9N0y4AAAARY3Jvc3NsaW5rLWNvbW1lbnQAAAAAAAAABnNoYTUxMgAAAFMAAAALc3NoLWVkMjU1MTkAAABALk3xqsL+kY+Tdk9q1sWrq0sRHVt/qu+CA6w7ffMfVSMWYPY/bErfSSFFOrPO251t4I2JcCJw6xr/hi0b2xv6Bg=="
+        }
+      }
+    },
+    "94dc4260-75e1-4e89-b057-3a93af7d91d1": {
+      "uuid": "94dc4260-75e1-4e89-b057-3a93af7d91d1",
+      "display_id": 793,
+      "title": "Review work of commit 250392bb: verify per-phase agent types, model-from-config, --agent flag, created_by preservation (was #792, rehydrated away)",
+      "status": "open",
+      "priority": "high",
+      "created_by": "driver",
+      "created_at": "2026-07-31T19:39:15.130712937Z",
+      "updated_at": "2026-07-31T21:48:27.836730832Z",
+      "labels": [
+        "feature"
+      ],
+      "comments": {
+        "15b5974f-22e9-46d7-ac37-2812ce97377a": {
+          "display_id": 1125,
+          "author": "dY7W-IX7N-adversarial-review-of-issue-793-review-commit-4564",
+          "content": "[REVIEW FINDING - MEDIUM] No tests for non-Claude agent command building\n\nFiles: crosslink/src/commands/kickoff/launch.rs:224-232, crosslink/src/commands/kickoff/tests.rs\n\nAll 14 build_agent_command tests use agent_binary='claude'. Zero tests for non-Claude agents (e.g. agent_binary='opencode'). The non-Claude code path (launch.rs:228-232) has different flag handling: omits --model, --agent, --allowedTools; still emits env -u CLAUDECODE (Claude-specific); uses stdin piping. This path was modified in this commit (permission-flag gating was added) but remains untested. The read_agent_binary tests at tests.rs:2267-2274 already use 'opencode' as a non-claude binary, confirming multi-binary support was intended.",
+          "created_at": "2026-07-31T20:19:46.718352766Z",
+          "kind": "observation",
+          "signed_by": "SHA256:VvMLcldJF+PAIpas/QCEKEFDpJAd9SOOfRQdT073mI8",
+          "signature": "U1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAgO94fT1TId3XeqUpjpXaGQ5p/FJej3fYwpiG0yyMZeZ8AAAARY3Jvc3NsaW5rLWNvbW1lbnQAAAAAAAAABnNoYTUxMgAAAFMAAAALc3NoLWVkMjU1MTkAAABASodZIr6PIt7fT8uqYcIFHvuNojnKuEg11he84/3p7gI84qsIqX58LMEtRO4+/IENWZI83qw3J69fwaHjpDYkBQ=="
+        },
+        "27f5a8fb-5b3f-490a-9bfa-fbd0f891db58": {
+          "display_id": 1136,
+          "author": "driver",
+          "content": "REPRODUCTION COMPLETE — upstream dashboard crash (forecast-bio/crosslink#654), tested on dollspace-gay/crosslink main (1599237), Linux x86_64.\n\nMethod: cloned main fresh, built dashboard frontend (620KB JS asset, matches the report's 621KB), built crosslink binary (CARGO_BUILD_JOBS=1 + lld, embedded bundle), ran 'crosslink dashboard serve'.\n\nResult: CRASH DOES NOT REPRODUCE on current main. Both serve paths served the asset with server staying alive:\n- embedded path: GET /assets/index-*.js → 200 (620,235 bytes), process stays up\n- --dashboard-dir ServeDir: same → 200, stays up\n- OPTIONS preflight → 200, Range → 200, missing asset → 200 (index.html fallback), path traversal → 200 (index.html, NOT /etc/passwd)\n- /ws + /ws/pty upgrade handshake: connection held, server survived\n\nSupports the devs' (dollspace-gay + magnificentlycursed) conclusion that the original crash was environment/lock-specific. Found supporting evidence for their hypothesis: a fresh 'npm install' WITHOUT the committed lockfile currently FAILS (missing @testing-library/dom peer → tsc build errors), so an un-locked install time can produce a broken tree. Repo has all lockfiles committed (crosslink/Cargo.lock, dashboard/package-lock.json).\n\nConclusion: issue #654 is not reproducible on current main; likely closeable per the maintainer's suggestion, or requires the original reporter's exact environment.",
+          "created_at": "2026-07-31T20:58:33.879996163Z",
+          "kind": "result",
+          "signed_by": "SHA256:cx5PuRP0j7pktPKktl0WwbMp5uEwfFy9WoiBcgyhe18",
+          "signature": "U1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAguEQKo5PmNONBqYSfFi6Ry6tvLy9D5GLM9YcPkF7QNdoAAAARY3Jvc3NsaW5rLWNvbW1lbnQAAAAAAAAABnNoYTUxMgAAAFMAAAALc3NoLWVkMjU1MTkAAABAjCva2pb+kYQqnUcP8uNsXq4X0ujxyFfeizUo+5MPXuFFzii9ix3se666VHRLoB4dJBt4o2DnPmDQywbQT+bFDQ=="
+        },
+        "2de06f84-9c94-431c-9723-6679cdcb2259": {
+          "display_id": 1128,
+          "author": "dY7W-IX7N-adversarial-review-of-issue-793-review-commit-4564",
+          "content": "[REVIEW FINDING - LOW] Placeholder substitution order in custom kickoff templates\n\nFile: crosslink/src/commands/kickoff/run.rs:116-120\n\nThe custom template placeholder substitution uses sequential .replace() calls: {issue_id} -> {branch_name} -> {description}. While str::replace replaces ALL occurrences of each pattern, the sequential execution means replacement values can be cross-substituted. If branch_name is replaced with a value containing '{description}' (unlikely but possible with custom branch names), the subsequent {description} replacement would modify the branch name value. The order matters: if description contained '{issue_id}', it would not be re-substituted (since issue_id is already replaced), but if branch_name contained '{description}', it WOULD be substituted. Using a single-pass substitution would be safer.",
+          "created_at": "2026-07-31T20:20:18.515047900Z",
+          "kind": "observation",
+          "signed_by": "SHA256:VvMLcldJF+PAIpas/QCEKEFDpJAd9SOOfRQdT073mI8",
+          "signature": "U1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAgO94fT1TId3XeqUpjpXaGQ5p/FJej3fYwpiG0yyMZeZ8AAAARY3Jvc3NsaW5rLWNvbW1lbnQAAAAAAAAABnNoYTUxMgAAAFMAAAALc3NoLWVkMjU1MTkAAABA8n4syao3cXEZgWb870yn75SmgQBBSt2ObgZgSnuVzX/9VAoxm8kAkFNG6UOUx6Zv+Y1ps76hfGE7BlXY/liwBA=="
+        },
+        "591e2804-9188-48cb-81fa-93b0d25b398c": {
+          "display_id": 1124,
+          "author": "dY7W-IX7N-adversarial-review-of-issue-793-review-commit-4564",
+          "content": "[REVIEW FINDING - HIGH] read_kickoff_template global fallback silently replaces built-in build_prompt\n\nFile: crosslink/src/utils.rs:92-124, called from crosslink/src/commands/kickoff/run.rs:114-123\n\nThe read_kickoff_template function was modified to fall back to ~/.crosslink/rules/kickoff.md when no project-specific template (agent.kickoff_template) is configured. Previously it returned None, causing build_prompt (the rich built-in prompt with spec validation, CI verification, acceptance criteria extraction, test instructions, code quality rules, blocked-actions) to be used.\n\nOn this machine, ~/.crosslink/rules/kickoff.md exists and contains a simplified template that only supports {issue_id}, {branch_name}, {description} placeholders. It does NOT include spec validation, CI verification, or acceptance criteria sections. This means ALL projects without a custom kickoff_template configured will silently switch from the rich built-in prompt to the simpler global template. build_prompt is now only reached when neither a project-specific nor global template exists.\n\nNo way to opt back into build_prompt when the global file exists: agent.no_template=true produces an empty prompt (not build_prompt).",
+          "created_at": "2026-07-31T20:19:30.596899728Z",
+          "kind": "observation",
+          "signed_by": "SHA256:VvMLcldJF+PAIpas/QCEKEFDpJAd9SOOfRQdT073mI8",
+          "signature": "U1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAgO94fT1TId3XeqUpjpXaGQ5p/FJej3fYwpiG0yyMZeZ8AAAARY3Jvc3NsaW5rLWNvbW1lbnQAAAAAAAAABnNoYTUxMgAAAFMAAAALc3NoLWVkMjU1MTkAAABATmxoS9R64LeLFW+n2oT2p3vmOLsa6WuAtZOGgI8gm+z3f19QoaBQKTafqQyDINrLePz9MXqYVKEaRgc1OujMDw=="
+        },
+        "797c1ba7-2814-4243-92ea-6efcda0b6cca": {
+          "display_id": 1131,
+          "author": "dY7W-IX7N-adversarial-review-of-issue-793-review-commit-4564",
+          "content": "[REVIEW FINDING - INFO] Clippy style warnings in changed code\n\nFiles: crosslink/src/commands/kickoff/run.rs:118-119, run.rs:219-222, crosslink/src/utils.rs:12\n\ncargo clippy -W clippy::all produces these warnings in changed code (not bugs, but style issues):\n- run.rs:118-119: literal_string_with_formatting_args on .replace('{issue_id}', ...) and .replace('{branch_name}', ...) - the string literals look like format strings but are used in str::replace\n- run.rs:219-222: map_unwrap_or - opts.agent_type.map(|s| s.to_string()).unwrap_or_else(...) could be simplified to .map_or_else(...) or .map_or(...)\nNote: utils.rs:12 warning is on pre-existing read_agent_binary code, not this commit's changes.",
+          "created_at": "2026-07-31T20:20:45.804442507Z",
+          "kind": "observation",
+          "signed_by": "SHA256:VvMLcldJF+PAIpas/QCEKEFDpJAd9SOOfRQdT073mI8",
+          "signature": "U1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAgO94fT1TId3XeqUpjpXaGQ5p/FJej3fYwpiG0yyMZeZ8AAAARY3Jvc3NsaW5rLWNvbW1lbnQAAAAAAAAABnNoYTUxMgAAAFMAAAALc3NoLWVkMjU1MTkAAABAPTh/luFvx4Ew3G7IqoubxcyrfLHrglbf5HPbOm80F647Su98SgKSeU0Xykaxc78VdSugQqU76oHRdc9sU3VmCg=="
+        },
+        "7d6b7d37-919f-49db-a197-2613c04b456c": {
+          "display_id": 1133,
+          "author": "dY7W-IX7N-adversarial-review-of-issue-793-review-commit-4564",
+          "content": "Completed: Adversarial review of commit 250392bb (13 files). Build succeeds, all tests pass. Filed 7 findings as comments on issue #793: 1 HIGH (read_kickoff_template global fallback overrides built-in build_prompt), 2 MEDIUM (no tests for new utility functions, no tests for non-Claude agent path), 3 LOW (.opencheck propagation issues, HOME env var on Windows, placeholder substitution order), 2 INFO (no --agent CLI flag, clippy warnings). Verified correct implementations for per-phase agent types, model-from-config, claude --agent flag threading, created_by preservation, and permission-flag gating.",
+          "created_at": "2026-07-31T20:21:52.596976144Z",
+          "kind": "handoff",
+          "signed_by": "SHA256:VvMLcldJF+PAIpas/QCEKEFDpJAd9SOOfRQdT073mI8",
+          "signature": "U1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAgO94fT1TId3XeqUpjpXaGQ5p/FJej3fYwpiG0yyMZeZ8AAAARY3Jvc3NsaW5rLWNvbW1lbnQAAAAAAAAABnNoYTUxMgAAAFMAAAALc3NoLWVkMjU1MTkAAABAZU4/mOSGuASicluPo9ROL+wKkq1CLYp2EkR+3HKkAA4OoEQZrqxQniB1bsNx8xjEol3m+C/O/HSTbtIXpAjkAQ=="
+        },
+        "9f1b34e9-5808-418b-bd1d-d65790911ccd": {
+          "display_id": 1122,
+          "author": "driver",
+          "content": "Tracking issue recreated because the main repo's crosslink DB was rehydrated from the read-only origin remote (403), dropping the local-only fork-work issues including original #792. The builder agent is running under #792 in its worktree (which retained the issue). This issue #793 covers the reviewer pass for commit 250392bb (the 13 committed files). Original scope in #792's comments.",
+          "created_at": "2026-07-31T19:39:29.868745943Z",
+          "kind": "plan",
+          "signed_by": "SHA256:cx5PuRP0j7pktPKktl0WwbMp5uEwfFy9WoiBcgyhe18",
+          "signature": "U1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAguEQKo5PmNONBqYSfFi6Ry6tvLy9D5GLM9YcPkF7QNdoAAAARY3Jvc3NsaW5rLWNvbW1lbnQAAAAAAAAABnNoYTUxMgAAAFMAAAALc3NoLWVkMjU1MTkAAABAYeBi+5HkjeOLHMhtHO+BFBoWmUFuvpUhM35EwLhTOUrFxVXqjDivXd07329rIZmzhHQv/Stcfy0oalnFclxiBw=="
+        },
+        "a07d7f0a-4cf7-40fc-99dc-c6cfb7fd671c": {
+          "display_id": 1132,
+          "author": "dY7W-IX7N-adversarial-review-of-issue-793-review-commit-4564",
+          "content": "[REVIEW SUMMARY] Commit 250392bb review complete. 13 files reviewed.\n\nBuild: cargo build succeeds (2 pre-existing warnings: prune_events unused, encode_batch unused).\nTests: All 1778 lib tests + 14 kickoff build_agent_command tests + 14 import tests pass (including 2 new created_by preservation tests).\n\nVerified correct implementations:\n- Per-phase agent types: read_phase_agent_type (utils.rs:63-82) correctly checks agent.phase_types.<phase> then falls back to agent.type -> 'builder'. Used in swarm/lifecycle.rs:729-748.\n- Model-from-config: read_agent_model (utils.rs:44-57) reads sentinel.default_agent.model (registered config key, config_registry.rs:234), defaults to 'opus'. Used in swarm/lifecycle.rs:737.\n- --agent flag to claude: correctly added to claude command in build_agent_command (launch.rs:226, launch.rs:823).\n- created_by preservation: create_issue_with_author/create_subissue_with_author (issues.rs:38-89) correctly thread created_by to INSERT. Import tests verify round-trip. Export reads created_by via get_issue_export_metadata (issues.rs:526-542).\n- Permission-flag gating: permission flags gated behind agent_binary=='claude' (launch.rs:193-203). Correct - non-Claude agents don't receive --permission-mode or --dangerously-skip-permissions.\n\nFindings filed: 1 HIGH, 2 MEDIUM, 3 LOW, 2 INFO (7 total).",
+          "created_at": "2026-07-31T20:21:11.910384816Z",
+          "kind": "result",
+          "signed_by": "SHA256:VvMLcldJF+PAIpas/QCEKEFDpJAd9SOOfRQdT073mI8",
+          "signature": "U1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAgO94fT1TId3XeqUpjpXaGQ5p/FJej3fYwpiG0yyMZeZ8AAAARY3Jvc3NsaW5rLWNvbW1lbnQAAAAAAAAABnNoYTUxMgAAAFMAAAALc3NoLWVkMjU1MTkAAABAKKyCAWuktGwn7aUXaHhaMl1hG42YtVjg4ZPLoEOuddN22W/Vyxi/TX1+gVVqkwLU9V62CYybwCPOzdAcMDeSBw=="
+        },
+        "ac0c468e-c2d2-4b63-a45b-5f533b7bd83e": {
+          "display_id": 1135,
+          "author": "driver",
+          "content": "Reproduction of upstream dashboard crash (forecast-bio/crosslink#654) started: cloned dollspace-gay/crosslink main (1599237) into /tmp/opencode/crosslink-repro. Dashboard built (620KB JS asset, matches the report). Found: fresh npm install WITHOUT package-lock resolution is already broken — @testing-library/dom peer not installed, tsc build fails. Building crosslink binary with embedded bundle now (CARGO_BUILD_JOBS=1 + lld). Will test dashboard serve + static asset GET on Linux.",
+          "created_at": "2026-07-31T20:38:45.118863700Z",
+          "kind": "plan",
+          "signed_by": "SHA256:cx5PuRP0j7pktPKktl0WwbMp5uEwfFy9WoiBcgyhe18",
+          "signature": "U1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAguEQKo5PmNONBqYSfFi6Ry6tvLy9D5GLM9YcPkF7QNdoAAAARY3Jvc3NsaW5rLWNvbW1lbnQAAAAAAAAABnNoYTUxMgAAAFMAAAALc3NoLWVkMjU1MTkAAABA42k5RwBPIBY/YN0uK7UnivtCI6obMdZ/pLlEF2A/BnqDECj3wEE4Drt53e6PXgYO+kaoTbzwGcAHUuI8gACZAw=="
+        },
+        "adf2df98-ee79-444d-89e4-fa758179ba9f": {
+          "display_id": 1137,
+          "author": "driver",
+          "content": "Fork branch strategy resolved: created fork-local/agents = PR work (3db234dc) + 13-files commit (32617279) + builder's HOME-isolation fix (dfeee2c6). PR #44 branch (feat/43-configurable-kickoff-template) untouched. Builder's fix verified locally: 3/3 kickoff dry-run tests + full 194 cli_integration suite pass. The earlier divergent merge (re-introducing V3-lock commit) was abandoned in favor of targeted cherry-picks.",
+          "created_at": "2026-07-31T21:48:27.828945935Z",
+          "kind": "result",
+          "signed_by": "SHA256:cx5PuRP0j7pktPKktl0WwbMp5uEwfFy9WoiBcgyhe18",
+          "signature": "U1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAguEQKo5PmNONBqYSfFi6Ry6tvLy9D5GLM9YcPkF7QNdoAAAARY3Jvc3NsaW5rLWNvbW1lbnQAAAAAAAAABnNoYTUxMgAAAFMAAAALc3NoLWVkMjU1MTkAAABAi1c7sZ0W6k/ZA/V7q8oFjo+zJm4v0KJzEug5Etc9Y9trfQcLNmCCPREcBT3mepmZSkCNrhUt6iUP9/hTp0PHDA=="
+        },
+        "b9502e42-ff32-4f92-a689-984077f7935c": {
+          "display_id": 1129,
+          "author": "dY7W-IX7N-adversarial-review-of-issue-793-review-commit-4564",
+          "content": "[REVIEW FINDING - LOW] read_kickoff_template global fallback uses HOME env var, breaks on Windows\n\nFile: crosslink/src/utils.rs:114\n\nThe new global fallback in read_kickoff_template uses std::env::var('HOME').ok()?. On Windows, HOME is typically not set (Windows uses USERPROFILE). The codebase already has a cross-platform home_dir() helper in sync/trust.rs:14-22 that checks USERPROFILE on Windows and HOME on Unix, but it is private and cannot be reused. Other parts of the codebase (dashboard/db.rs:174-181, sync/trust.rs:14-21) use the cross-platform pattern. The fallback will silently return None on Windows, falling back to build_prompt, which is inconsistent with Unix behavior. Consider using std::env::var('USERPROFILE').or_else(|_| std::env::var('HOME')) or the existing home_dir pattern.",
+          "created_at": "2026-07-31T20:20:24.309464876Z",
+          "kind": "observation",
+          "signed_by": "SHA256:VvMLcldJF+PAIpas/QCEKEFDpJAd9SOOfRQdT073mI8",
+          "signature": "U1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAgO94fT1TId3XeqUpjpXaGQ5p/FJej3fYwpiG0yyMZeZ8AAAARY3Jvc3NsaW5rLWNvbW1lbnQAAAAAAAAABnNoYTUxMgAAAFMAAAALc3NoLWVkMjU1MTkAAABA3rI36KJQAdBNLYREMm5bVdRjeQ22TJ0WZxLAxHHVrWeiUyan6b760egLsRDpezuh7fdntH/xKUCSpTB1l4wzCw=="
+        },
+        "c27132ee-e42f-479c-9748-02d485d217f6": {
+          "display_id": 1127,
+          "author": "dY7W-IX7N-adversarial-review-of-issue-793-review-commit-4564",
+          "content": "[REVIEW FINDING - LOW] .opencheck/agents/ propagation issues\n\nFile: crosslink/src/commands/kickoff/run.rs:179-195\n\nThree issues with the .opencheck/agents/ propagation code added in this commit:\n\n1. Only copies .md files (run.rs:189): if src.extension().map_or(false, |e| e == 'md'). OpenCode agent definitions can include .json config files. Only .md files are propagated, silently skipping .json and other files.\n\n2. Silent failures (run.rs:185,186,191): let _ = on create_dir_all, read_dir, and copy. If the source dir exists but is unreadable, or files can't be copied, the agent fails downstream with a confusing 'agent not found' error instead of a clear propagation failure. No warning is logged.\n\n3. No stale file cleanup: overwrites matching files but doesn't remove files in worktree's .opencheck/agents/ that don't exist in source. Renamed/removed agent definitions remain stale in the worktree, potentially causing --agent to select a stale definition.",
+          "created_at": "2026-07-31T20:20:11.906927294Z",
+          "kind": "observation",
+          "signed_by": "SHA256:VvMLcldJF+PAIpas/QCEKEFDpJAd9SOOfRQdT073mI8",
+          "signature": "U1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAgO94fT1TId3XeqUpjpXaGQ5p/FJej3fYwpiG0yyMZeZ8AAAARY3Jvc3NsaW5rLWNvbW1lbnQAAAAAAAAABnNoYTUxMgAAAFMAAAALc3NoLWVkMjU1MTkAAABArb/spCDxMbvsNfdhfboT7MunlU1Ur31+bDGDtsa3x7b23gcyAbBKE3iYrGQzEYsHIbfGui5HSJr3NWVGWIMHAg=="
+        },
+        "cb922b9c-56b8-4c9f-9278-7c0177989c64": {
+          "display_id": 1126,
+          "author": "dY7W-IX7N-adversarial-review-of-issue-793-review-commit-4564",
+          "content": "[REVIEW FINDING - MEDIUM] No unit tests for new agent config utility functions\n\nFiles: crosslink/src/utils.rs:26-82 (read_agent_type, read_agent_model, read_phase_agent_type), crosslink/src/utils.rs:92-124 (modified read_kickoff_template)\n\nThree new functions were added (read_agent_type, read_agent_model, read_phase_agent_type) and read_kickoff_template was substantially modified (new global fallback behavior). None have unit tests. The pre-existing read_agent_binary has 4 tests in tests.rs:2259-2293 establishing a clear test pattern (tempdir + hook-config.json + assert return). The new functions follow the same pattern but were not tested.\n\nUntested edge cases:\n- Missing/empty agent.type -> should default to 'builder'\n- Missing agent.phase_types.<phase> -> should fall back to agent.type\n- Missing sentinel.default_agent.model -> should default to 'opus'\n- Missing hook-config.json -> all defaults\n- Invalid JSON -> all defaults",
+          "created_at": "2026-07-31T20:19:53.301563992Z",
+          "kind": "observation",
+          "signed_by": "SHA256:VvMLcldJF+PAIpas/QCEKEFDpJAd9SOOfRQdT073mI8",
+          "signature": "U1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAgO94fT1TId3XeqUpjpXaGQ5p/FJej3fYwpiG0yyMZeZ8AAAARY3Jvc3NsaW5rLWNvbW1lbnQAAAAAAAAABnNoYTUxMgAAAFMAAAALc3NoLWVkMjU1MTkAAABAE5+5wxmcdLhL1WiRvG9bTKJHgIEsX3gfNnA1bEHosCCs2Z6bcL2YHlUQOG/xNzpv/4TG8Nm/Ew0BPHDedto+AA=="
+        },
+        "ef43b1ef-5a66-4173-bb68-1708480178eb": {
+          "display_id": 1130,
+          "author": "dY7W-IX7N-adversarial-review-of-issue-793-review-commit-4564",
+          "content": "[REVIEW FINDING - INFO] No --agent CLI flag in main.rs; agent_type always None in CLI dispatch\n\nFiles: crosslink/src/main.rs:1652-1848, crosslink/src/commands/kickoff/mod.rs:95,285,370\n\nThe commit title says '--agent flag threading through kickoff launch/run/plan'. The agent_type field was added to KickoffOpts (types.rs:105) and threaded through build_agent_command (adds --agent <type> to claude CLI), launch_local, launch_container, run, and plan. However, NO --agent CLI flag was added to any KickoffCommands variant in main.rs (Run, Launch, Plan).\n\nAll CLI dispatch paths set agent_type: None (mod.rs:95, 285, 370). Only swarm/lifecycle.rs:748 sets agent_type: Some(&phase_agent_type) (from config). sentinel/engine.rs:481 also passes None.\n\nThe 'agent_type Option' field is never populated from CLI input - it's only used programmatically by swarm. The commit's '--agent flag' refers to the --agent argument passed to the claude binary (which IS correctly implemented), not a crosslink CLI flag. This is an observation, not a bug - the design allows programmatic override (swarm) with config fallback.",
+          "created_at": "2026-07-31T20:20:39.696911456Z",
+          "kind": "observation",
+          "signed_by": "SHA256:VvMLcldJF+PAIpas/QCEKEFDpJAd9SOOfRQdT073mI8",
+          "signature": "U1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAgO94fT1TId3XeqUpjpXaGQ5p/FJej3fYwpiG0yyMZeZ8AAAARY3Jvc3NsaW5rLWNvbW1lbnQAAAAAAAAABnNoYTUxMgAAAFMAAAALc3NoLWVkMjU1MTkAAABAOUD7voaRjhfD+Sn+QEFU/d9IOKxYn4NS8yM/iQSVp+MMJMEq2GkPiobqGEklgJSvYWfFEQWd2Hf9k/3aLRV0Aw=="
         }
       }
     },
@@ -17028,6 +17236,48 @@
           "kind": "result",
           "signed_by": "SHA256:6GbEO9gckWEeR3l6YB3LUaTe1Oc9qqn0WLtMVuu7a8A",
           "signature": "U1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAgqj5+UR1olg7w0+zZwuWbsWpzM2FlVsxso1l+rn8dSfAAAAASY3Jvc3NsaW5rLWJhY2tmaWxsAAAAAAAAAAZzaGE1MTIAAABTAAAAC3NzaC1lZDI1NTE5AAAAQKYaqgBjwt5Z5yh+HOmjrtuCXa/Q1nes2rNon+QJhQhkD30lLfoE8UjUli1EUEKsYaU34iXWKXPGJyLyirMmrQQ="
+        }
+      }
+    },
+    "ac1e9b26-5cac-446c-9abf-efecc22b978b": {
+      "uuid": "ac1e9b26-5cac-446c-9abf-efecc22b978b",
+      "display_id": 792,
+      "title": "Finalize 13 uncommitted fork files: per-phase agent types, model-from-config, --agent flag, template placeholders, import/export created_by",
+      "status": "open",
+      "priority": "high",
+      "created_by": "driver",
+      "created_at": "2026-07-31T19:33:41.073823133Z",
+      "updated_at": "2026-07-31T20:29:27.603864383Z",
+      "labels": [
+        "feature"
+      ],
+      "comments": {
+        "0b3d30a9-9145-4a5b-80a8-a14b9d3d703e": {
+          "display_id": 1120,
+          "author": "driver",
+          "content": "Scope: 13 uncommitted files in working tree on branch feat/43-configurable-kickoff-template.\n\n1. crosslink/src/utils.rs — read_agent_type, read_agent_model, read_phase_agent_type, global kickoff template fallback\n2. crosslink/src/commands/kickoff/launch.rs — --agent flag threading, permission-flag gating for non-claude\n3. crosslink/src/commands/kickoff/run.rs — placeholder substitution, .opencode agent propagation\n4. crosslink/src/commands/kickoff/mod.rs, plan.rs, types.rs, tests.rs — agent_type plumbing\n5. crosslink/src/commands/swarm/lifecycle.rs — per-phase agent types, model from hook-config\n6. crosslink/src/commands/sentinel/engine.rs — agent_type plumbing\n7. crosslink/src/commands/import.rs, export.rs, db/issues.rs — created_by preservation\n8. .crosslink/rules/global.md — memory awareness rule\n\nMaps to ASES issues #75 (per-phase agent type), #76 (skip-permissions), #77 (model-from-config), #99 (--agent flag), #101 (phase fallback).",
+          "created_at": "2026-07-31T19:33:51.197226997Z",
+          "kind": "plan",
+          "signed_by": "SHA256:cx5PuRP0j7pktPKktl0WwbMp5uEwfFy9WoiBcgyhe18",
+          "signature": "U1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAguEQKo5PmNONBqYSfFi6Ry6tvLy9D5GLM9YcPkF7QNdoAAAARY3Jvc3NsaW5rLWNvbW1lbnQAAAAAAAAABnNoYTUxMgAAAFMAAAALc3NoLWVkMjU1MTkAAABAEhlI0opG/fE1HOTQtQRoT51HdxYjuelAeYsCb5OmW05VegrGSguPWItmPNSQwpZBT5T4VSzhei4RVqqZW4n2Cw=="
+        },
+        "576fccca-3fbc-4269-974e-634ec7fd6e05": {
+          "display_id": 1121,
+          "author": "dY7W-9AES-verify-the-13-files-committed-under-issue-792-commit",
+          "content": "Plan: Verify commit 250392bb (13 files) builds with CARGO_BUILD_JOBS=1 RUSTFLAGS='-C link-arg=-fuse-ld=lld' and passes cargo test for the crosslink crate. Review each change for correctness: (1) utils.rs new readers (read_agent_type/read_agent_model/read_phase_agent_type) and global kickoff template fallback, (2) launch.rs --agent flag threading + permission gating for non-claude, (3) run.rs placeholder substitution + .opencode agent propagation, (4) agent_type plumbing in mod/plan/types/tests, (5) swarm lifecycle per-phase agent types + model-from-config, (6) sentinel agent_type plumbing, (7) import/export/db created_by preservation, (8) rules/global.md memory note. Fix anything clearly broken, then summarize findings on #792.",
+          "created_at": "2026-07-31T19:36:42.565903645Z",
+          "kind": "plan",
+          "signed_by": "SHA256:yK7upLp7cJuv/hZFMjvGxMM4qUIbpQlAiIVSE02A/BM",
+          "signature": "U1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAg5uyo8Q0tZRTwVMaeyxV3n70wQuZgqRdnpg9xgCZ6FsIAAAARY3Jvc3NsaW5rLWNvbW1lbnQAAAAAAAAABnNoYTUxMgAAAFMAAAALc3NoLWVkMjU1MTkAAABAi/mBBaW4sXF3SM3VTQKDG+U31CdPkv2xnc5yfMQ0Hg7GKqNepTZXdiw84jUdMpMrJtqTrTpvyLP2/rkm5kJGAg=="
+        },
+        "76425a75-0bda-4bf9-aaf0-e8ff9acda720": {
+          "display_id": 1134,
+          "author": "dY7W-9AES-verify-the-13-files-committed-under-issue-792-commit",
+          "content": "Progress: cargo build succeeds with CARGO_BUILD_JOBS=1 RUSTFLAGS='-C link-arg=-fuse-ld=lld' (only 2 pre-existing dead-code warnings in events.rs, untouched by this commit). cargo test --lib: 1778 passed, 0 failed. cargo test --bin crosslink: 2842 passed, 0 failed. Note: the initial combined cargo test was SIGTERM'd during bin-test compile due to 8GB VPS memory pressure with a concurrent reviewer worktree compiling in parallel; ran --lib and --bin sequentially instead. Found and fixed a formatting defect in tests.rs: 14 KickoffOpts literals had 12-space instead of 8-space indentation (rustfmt violation, cosmetic only). Running integration tests (cli_integration, smoke, ac10_deleted_machinery) now.",
+          "created_at": "2026-07-31T20:29:27.596835310Z",
+          "kind": "observation",
+          "signed_by": "SHA256:yK7upLp7cJuv/hZFMjvGxMM4qUIbpQlAiIVSE02A/BM",
+          "signature": "U1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAg5uyo8Q0tZRTwVMaeyxV3n70wQuZgqRdnpg9xgCZ6FsIAAAARY3Jvc3NsaW5rLWNvbW1lbnQAAAAAAAAABnNoYTUxMgAAAFMAAAALc3NoLWVkMjU1MTkAAABAmWqFMhjAl9Q9NLhTIwBryUM2yzyBhOpXmsqc6pZ/nLbNdfaEfFyOYxfYA0GsFtKY0EIFDyFQ8K6xLUANxve9Ag=="
         }
       }
     },
@@ -21042,6 +21292,19 @@
         }
       }
     },
+    "dbef06e3-65a4-4731-a38b-b331697e7528": {
+      "uuid": "dbef06e3-65a4-4731-a38b-b331697e7528",
+      "display_id": 788,
+      "title": "Make Crosslink model- and provider-agnostic with configurable agent binary and pricing",
+      "status": "open",
+      "priority": "high",
+      "created_by": "anon-2e6f9fa2",
+      "created_at": "2026-07-11T06:35:16.796294281Z",
+      "updated_at": "2026-07-11T06:35:18.186654277Z",
+      "labels": [
+        "feature"
+      ]
+    },
     "dc1f4872-07f8-4622-aa7f-3429501b0391": {
       "uuid": "dc1f4872-07f8-4622-aa7f-3429501b0391",
       "display_id": 120,
@@ -21327,6 +21590,19 @@
           "signature": "U1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAgqj5+UR1olg7w0+zZwuWbsWpzM2FlVsxso1l+rn8dSfAAAAASY3Jvc3NsaW5rLWJhY2tmaWxsAAAAAAAAAAZzaGE1MTIAAABTAAAAC3NzaC1lZDI1NTE5AAAAQL/nsLfbD0k1g8wFsO7S7JCaS2Qpo4jHRPQIAhU6AuZBIUCJdJQQelsasLP64ZuLx2gPsdfemZAFG483P8uF4wk="
         }
       }
+    },
+    "e0ca87b3-7aa6-4f50-9057-cd034556bd88": {
+      "uuid": "e0ca87b3-7aa6-4f50-9057-cd034556bd88",
+      "display_id": 789,
+      "title": "Adversarial review of model-agnostic implementation",
+      "status": "open",
+      "priority": "high",
+      "created_by": "anon-2e6f9fa2",
+      "created_at": "2026-07-12T17:03:57.044909159Z",
+      "updated_at": "2026-07-12T17:03:58.593080316Z",
+      "labels": [
+        "review"
+      ]
     },
     "e0dea756-5442-4bf4-be76-142b175d7a54": {
       "uuid": "e0dea756-5442-4bf4-be76-142b175d7a54",
@@ -22161,6 +22437,30 @@
           "kind": "result",
           "signed_by": "SHA256:eHpbrpU/tOUroPHQwwGZTQKY+0tU0E2rZw5zFEs1jHE",
           "signature": "U1NIU0lHAAAAAQAAAGgAAAATZWNkc2Etc2hhMi1uaXN0cDI1NgAAAAhuaXN0cDI1NgAAAEEEe0KY4l/Z7G/vfkx00kFwZtY3FjD8lde6VcPNSNT06kyL5ZUnzQGbJUMzOdlFd65s/RCzZhVJQVonLQ3yKzipGAAAABJjcm9zc2xpbmstYmFja2ZpbGwAAAAAAAAABnNoYTUxMgAAAGMAAAATZWNkc2Etc2hhMi1uaXN0cDI1NgAAAEgAAAAgCbSwM73yCpyz8Er8sEiMdyyHSiHRs/2Ma1SrgLIqdDsAAAAgPSbPKTR9x0/uetzRJNWLIixxzP9Uh2noOZqqWSgxTBU="
+        }
+      }
+    },
+    "ec6a5aea-9c06-46ad-a25f-771f7fc03384": {
+      "uuid": "ec6a5aea-9c06-46ad-a25f-771f7fc03384",
+      "display_id": 794,
+      "title": "Fix tracker_remote to writable fork remote so local-only issues survive sync",
+      "status": "open",
+      "priority": "high",
+      "created_by": "driver",
+      "created_at": "2026-07-31T19:40:58.029922318Z",
+      "updated_at": "2026-07-31T19:41:08.643421549Z",
+      "labels": [
+        "bug"
+      ],
+      "comments": {
+        "c5a4a6f4-54c0-4b15-b342-b9960301c958": {
+          "display_id": 1123,
+          "author": "driver",
+          "content": "Observed: creating issues #786-#793 in this repo's crosslink instance only works locally. tracker_remote is 'origin' = dollspace-gay/crosslink (read-only for rock-solid-sites, push returns 403). A sync during the kickoff launch rehydrated the main DB from the stale hub checkpoint, dropping the local-only fork-work issues (#786-#792) from the main DB; they survived only in the builder worktree DB. Fix: point tracker_remote at the writable 'fork' remote (rock-solid-sites/crosslink) so hub sync pushes succeed and local issues persist. File under this repo's config (hook-config.json tracker_remote).",
+          "created_at": "2026-07-31T19:41:08.633536546Z",
+          "kind": "observation",
+          "signed_by": "SHA256:cx5PuRP0j7pktPKktl0WwbMp5uEwfFy9WoiBcgyhe18",
+          "signature": "U1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAguEQKo5PmNONBqYSfFi6Ry6tvLy9D5GLM9YcPkF7QNdoAAAARY3Jvc3NsaW5rLWNvbW1lbnQAAAAAAAAABnNoYTUxMgAAAFMAAAALc3NoLWVkMjU1MTkAAABAeWSqU0I8kQe2DnoCRUu4fNEZsx4qIP5K+RHLvSNfs1Og0fHZAr1M5dP+kFLfhMSOG8m1WjrWCB6pciFuFhl1DQ=="
         }
       }
     },
@@ -24483,11 +24783,206 @@
       "agent_id": "anon-ab6221f8",
       "agent_seq": 12,
       "timestamp": "2026-06-22T19:00:04.227638091Z"
+    },
+    {
+      "agent_id": "anon-2e6f9fa2",
+      "agent_seq": 1,
+      "timestamp": "2026-07-11T06:34:02.725067031Z"
+    },
+    {
+      "agent_id": "anon-2e6f9fa2",
+      "agent_seq": 2,
+      "timestamp": "2026-07-11T06:34:04.123247120Z"
+    },
+    {
+      "agent_id": "anon-2e6f9fa2",
+      "agent_seq": 3,
+      "timestamp": "2026-07-11T06:35:16.796294281Z"
+    },
+    {
+      "agent_id": "anon-2e6f9fa2",
+      "agent_seq": 4,
+      "timestamp": "2026-07-11T06:35:18.186654277Z"
+    },
+    {
+      "agent_id": "anon-2e6f9fa2",
+      "agent_seq": 5,
+      "timestamp": "2026-07-12T17:03:57.044909159Z"
+    },
+    {
+      "agent_id": "anon-2e6f9fa2",
+      "agent_seq": 6,
+      "timestamp": "2026-07-12T17:03:58.593080316Z"
+    },
+    {
+      "agent_id": "anon-2e6f9fa2",
+      "agent_seq": 7,
+      "timestamp": "2026-07-15T10:24:02.426384444Z"
+    },
+    {
+      "agent_id": "anon-2e6f9fa2",
+      "agent_seq": 8,
+      "timestamp": "2026-07-15T10:24:04.280158479Z"
+    },
+    {
+      "agent_id": "driver",
+      "agent_seq": 1,
+      "timestamp": "2026-07-15T10:25:59.248865664Z"
+    },
+    {
+      "agent_id": "driver",
+      "agent_seq": 2,
+      "timestamp": "2026-07-15T10:27:12.805368839Z"
+    },
+    {
+      "agent_id": "driver",
+      "agent_seq": 3,
+      "timestamp": "2026-07-15T10:27:20.277335622Z"
+    },
+    {
+      "agent_id": "driver",
+      "agent_seq": 4,
+      "timestamp": "2026-07-31T19:33:41.073823133Z"
+    },
+    {
+      "agent_id": "driver",
+      "agent_seq": 5,
+      "timestamp": "2026-07-31T19:33:42.750440678Z"
+    },
+    {
+      "agent_id": "driver",
+      "agent_seq": 6,
+      "timestamp": "2026-07-31T19:33:51.204463592Z"
+    },
+    {
+      "agent_id": "dY7W-9AES-verify-the-13-files-committed-under-issue-792-commit",
+      "agent_seq": 1,
+      "timestamp": "2026-07-31T19:36:04.186730618Z"
+    },
+    {
+      "agent_id": "dY7W-9AES-verify-the-13-files-committed-under-issue-792-commit",
+      "agent_seq": 2,
+      "timestamp": "2026-07-31T19:36:42.573204661Z"
+    },
+    {
+      "agent_id": "driver",
+      "agent_seq": 7,
+      "timestamp": "2026-07-31T19:39:15.130712937Z"
+    },
+    {
+      "agent_id": "driver",
+      "agent_seq": 8,
+      "timestamp": "2026-07-31T19:39:17.203205030Z"
+    },
+    {
+      "agent_id": "driver",
+      "agent_seq": 9,
+      "timestamp": "2026-07-31T19:39:29.875706309Z"
+    },
+    {
+      "agent_id": "dY7W-IX7N-adversarial-review-of-issue-793-review-commit-4564",
+      "agent_seq": 1,
+      "timestamp": "2026-07-31T19:40:03.037284235Z"
+    },
+    {
+      "agent_id": "driver",
+      "agent_seq": 10,
+      "timestamp": "2026-07-31T19:40:58.029922318Z"
+    },
+    {
+      "agent_id": "driver",
+      "agent_seq": 11,
+      "timestamp": "2026-07-31T19:41:00.655666067Z"
+    },
+    {
+      "agent_id": "driver",
+      "agent_seq": 12,
+      "timestamp": "2026-07-31T19:41:08.643421549Z"
+    },
+    {
+      "agent_id": "dY7W-IX7N-adversarial-review-of-issue-793-review-commit-4564",
+      "agent_seq": 2,
+      "timestamp": "2026-07-31T20:19:30.700345498Z"
+    },
+    {
+      "agent_id": "dY7W-IX7N-adversarial-review-of-issue-793-review-commit-4564",
+      "agent_seq": 3,
+      "timestamp": "2026-07-31T20:19:46.805845453Z"
+    },
+    {
+      "agent_id": "dY7W-IX7N-adversarial-review-of-issue-793-review-commit-4564",
+      "agent_seq": 3,
+      "timestamp": "2026-07-31T20:19:53.309354324Z"
+    },
+    {
+      "agent_id": "dY7W-IX7N-adversarial-review-of-issue-793-review-commit-4564",
+      "agent_seq": 4,
+      "timestamp": "2026-07-31T20:20:12.004975344Z"
+    },
+    {
+      "agent_id": "dY7W-IX7N-adversarial-review-of-issue-793-review-commit-4564",
+      "agent_seq": 5,
+      "timestamp": "2026-07-31T20:20:18.601900514Z"
+    },
+    {
+      "agent_id": "dY7W-IX7N-adversarial-review-of-issue-793-review-commit-4564",
+      "agent_seq": 5,
+      "timestamp": "2026-07-31T20:20:24.405940521Z"
+    },
+    {
+      "agent_id": "dY7W-IX7N-adversarial-review-of-issue-793-review-commit-4564",
+      "agent_seq": 6,
+      "timestamp": "2026-07-31T20:20:39.705220176Z"
+    },
+    {
+      "agent_id": "dY7W-IX7N-adversarial-review-of-issue-793-review-commit-4564",
+      "agent_seq": 7,
+      "timestamp": "2026-07-31T20:20:45.811365237Z"
+    },
+    {
+      "agent_id": "dY7W-IX7N-adversarial-review-of-issue-793-review-commit-4564",
+      "agent_seq": 8,
+      "timestamp": "2026-07-31T20:21:11.997178062Z"
+    },
+    {
+      "agent_id": "dY7W-IX7N-adversarial-review-of-issue-793-review-commit-4564",
+      "agent_seq": 9,
+      "timestamp": "2026-07-31T20:21:46.199010868Z"
+    },
+    {
+      "agent_id": "dY7W-IX7N-adversarial-review-of-issue-793-review-commit-4564",
+      "agent_seq": 10,
+      "timestamp": "2026-07-31T20:21:52.603524633Z"
+    },
+    {
+      "agent_id": "dY7W-9AES-verify-the-13-files-committed-under-issue-792-commit",
+      "agent_seq": 3,
+      "timestamp": "2026-07-31T20:29:27.603864383Z"
+    },
+    {
+      "agent_id": "driver",
+      "agent_seq": 13,
+      "timestamp": "2026-07-31T20:38:45.126775343Z"
+    },
+    {
+      "agent_id": "driver",
+      "agent_seq": 14,
+      "timestamp": "2026-07-31T20:58:33.888134308Z"
+    },
+    {
+      "agent_id": "driver",
+      "agent_seq": 15,
+      "timestamp": "2026-07-31T21:48:27.836730832Z"
+    },
+    {
+      "agent_id": "driver",
+      "agent_seq": 16,
+      "timestamp": "2026-07-31T22:25:29.243571867Z"
     }
   ],
   "watermark": {
-    "timestamp": "2026-06-25T06:58:15.616538857Z",
-    "agent_id": "dashboard-bootstrap",
-    "agent_seq": 228
+    "timestamp": "2026-07-31T22:25:29.243571867Z",
+    "agent_id": "driver",
+    "agent_seq": 16
   }
 }

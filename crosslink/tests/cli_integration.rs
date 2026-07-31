@@ -15,6 +15,27 @@ fn run_crosslink(dir: &std::path::Path, args: &[&str]) -> (bool, String, String)
     (output.status.success(), stdout, stderr)
 }
 
+/// Run crosslink with `HOME` pointed at an isolated temp dir.
+///
+/// `read_kickoff_template` falls back to `~/.crosslink/rules/kickoff.md`
+/// when no project-specific template is configured (GH#792). Pointing HOME
+/// at a fresh dir keeps kickoff dry-run tests hermetic regardless of whether
+/// the developer machine has a global template.
+fn run_crosslink_isolated_home(dir: &std::path::Path, args: &[&str]) -> (bool, String, String) {
+    let home = tempdir().expect("tempdir for isolated HOME");
+    let output = Command::new(env!("CARGO_BIN_EXE_crosslink"))
+        .current_dir(dir)
+        .env("HOME", home.path())
+        .args(args)
+        .output()
+        .expect("Failed to execute crosslink");
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+    (output.status.success(), stdout, stderr)
+}
+
 /// Like run_crosslink but with --log-level info so tracing::info! messages appear on stderr.
 fn run_crosslink_info(dir: &std::path::Path, args: &[&str]) -> (bool, String, String) {
     let mut full_args = vec!["--log-level", "info"];
@@ -2846,7 +2867,7 @@ fn test_kickoff_dry_run_prints_prompt_and_metadata() {
     let dir = test_dir();
     init_git_and_crosslink(dir.path());
 
-    let (success, stdout, stderr) = run_crosslink(
+    let (success, stdout, stderr) = run_crosslink_isolated_home(
         dir.path(),
         &["kickoff", "run", "--dry-run", "add batch retry logic"],
     );
@@ -2874,7 +2895,7 @@ fn test_kickoff_dry_run_creates_kickoff_md() {
     let dir = test_dir();
     init_git_and_crosslink(dir.path());
 
-    let (success, stdout, _) = run_crosslink(
+    let (success, stdout, _) = run_crosslink_isolated_home(
         dir.path(),
         &["kickoff", "run", "--dry-run", "test file creation"],
     );

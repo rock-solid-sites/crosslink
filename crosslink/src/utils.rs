@@ -18,11 +18,77 @@ pub fn read_agent_binary(crosslink_dir: &Path) -> String {
         .unwrap_or_else(|| "claude".to_string())
 }
 
+/// Read the `agent.type` setting from `hook-config.json`.
+///
+/// Returns the configured agent type (e.g. "builder", "reviewer", "auditor"),
+/// or `"builder"` when the key is absent, empty, or the file cannot be parsed.
+/// This controls which OpenCode agent definition is used when launching.
+pub fn read_agent_type(crosslink_dir: &Path) -> String {
+    let config_path = crosslink_dir.join("hook-config.json");
+    let content = std::fs::read_to_string(&config_path).unwrap_or_default();
+    let parsed: serde_json::Value =
+        serde_json::from_str(&content).unwrap_or(serde_json::Value::Null);
+    parsed
+        .get("agent")
+        .and_then(|a| a.get("type"))
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| "builder".to_string())
+}
+
+/// Read the model from `hook-config.json`'s `sentinel.default_agent.model`.
+///
+/// Returns the configured model ID, or `"opus"` when the key is absent,
+/// empty, or the file cannot be parsed.
+pub fn read_agent_model(crosslink_dir: &Path) -> String {
+    let config_path = crosslink_dir.join("hook-config.json");
+    let content = std::fs::read_to_string(&config_path).unwrap_or_default();
+    let parsed: serde_json::Value =
+        serde_json::from_str(&content).unwrap_or(serde_json::Value::Null);
+    parsed
+        .get("sentinel")
+        .and_then(|s| s.get("default_agent"))
+        .and_then(|a| a.get("model"))
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| "opus".to_string())
+}
+
+/// Read the per-phase agent type from `hook-config.json`.
+///
+/// Checks `agent.phase_types.<phase_name>` first, then falls back to the
+/// global `agent.type` (defaults to `"builder"`).
+pub fn read_phase_agent_type(crosslink_dir: &Path, phase_name: &str) -> String {
+    let config_path = crosslink_dir.join("hook-config.json");
+    let content = std::fs::read_to_string(&config_path).unwrap_or_default();
+    let parsed: serde_json::Value =
+        serde_json::from_str(&content).unwrap_or(serde_json::Value::Null);
+
+    // Check per-phase override first
+    if let Some(phase_type) = parsed
+        .get("agent")
+        .and_then(|a| a.get("phase_types"))
+        .and_then(|pt| pt.get(phase_name))
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+    {
+        return phase_type.to_string();
+    }
+
+    // Fall back to global agent.type
+    read_agent_type(crosslink_dir)
+}
+
 /// Read the `agent.kickoff_template` setting from `hook-config.json`.
 ///
 /// Returns the template file path when configured, or `None` when the key is
 /// absent, empty, or the file cannot be parsed. The path is resolved relative
 /// to the crosslink directory when it is not absolute.
+///
+/// Falls back to `~/.crosslink/rules/kickoff.md` when no project-specific
+/// template is configured, allowing a global default across all projects.
 pub fn read_kickoff_template(crosslink_dir: &Path) -> Option<String> {
     let config_path = crosslink_dir.join("hook-config.json");
     let content = std::fs::read_to_string(&config_path).ok()?;
@@ -31,16 +97,30 @@ pub fn read_kickoff_template(crosslink_dir: &Path) -> Option<String> {
         .get("agent")
         .and_then(|a| a.get("kickoff_template"))
         .and_then(|v| v.as_str())
-        .filter(|s| !s.is_empty())?;
-    let template_path = if std::path::Path::new(path).is_absolute() {
-        std::path::PathBuf::from(path)
-    } else {
-        crosslink_dir.join(path)
-    };
-    // Read and return the template content
-    std::fs::read_to_string(&template_path)
-        .ok()
-        .filter(|s| !s.is_empty())
+        .filter(|s| !s.is_empty());
+    match path {
+        Some(p) => {
+            let template_path = if std::path::Path::new(p).is_absolute() {
+                std::path::PathBuf::from(p)
+            } else {
+                crosslink_dir.join(p)
+            };
+            std::fs::read_to_string(&template_path)
+                .ok()
+                .filter(|s| !s.is_empty())
+        }
+        None => {
+            // Fall back to global template at ~/.crosslink/rules/kickoff.md
+            let home = std::env::var("HOME").ok()?;
+            let global_template = std::path::PathBuf::from(home)
+                .join(".crosslink")
+                .join("rules")
+                .join("kickoff.md");
+            std::fs::read_to_string(global_template)
+                .ok()
+                .filter(|s| !s.is_empty())
+        }
+    }
 }
 
 /// Read the `agent.no_template` setting from `hook-config.json`.

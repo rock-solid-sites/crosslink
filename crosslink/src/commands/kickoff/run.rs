@@ -115,6 +115,9 @@ pub fn run(
         String::new()
     } else if let Some(custom) = crate::utils::read_kickoff_template(crosslink_dir) {
         custom
+            .replace("{issue_id}", &issue_id.to_string())
+            .replace("{branch_name}", &branch_name)
+            .replace("{description}", opts.description)
     } else {
         build_prompt(opts, issue_id, &branch_name, &conventions)
     };
@@ -173,6 +176,24 @@ pub fn run(
     // 8. Initialize crosslink + agent in worktree (only for real launches)
     let agent_id = init_worktree_agent(&worktree_dir, crosslink_dir, &compact_name)?;
 
+    // 8a. Propagate agent files from main repo to worktree so agents
+    //     can find their agent definitions. The worktree's .opencode/
+    //     from the branch is stale — copy the current ones from main repo.
+    let opencode_src = root.join(".opencode").join("agents");
+    if opencode_src.is_dir() {
+        let opencode_dst = worktree_dir.join(".opencode").join("agents");
+        let _ = std::fs::create_dir_all(&opencode_dst);
+        if let Ok(entries) = std::fs::read_dir(&opencode_src) {
+            for entry in entries.flatten() {
+                let src = entry.path();
+                if src.extension().map_or(false, |e| e == "md") {
+                    let dst = opencode_dst.join(src.file_name().unwrap());
+                    let _ = std::fs::copy(&src, &dst);
+                }
+            }
+        }
+    }
+
     // 8b. Record the pipeline run row now that the worktree and agent identity
     //     both exist — this is past the launch's point of no return, so the row
     //     carries the real agent_id and worktree path instead of the legacy
@@ -195,6 +216,10 @@ pub fn run(
 
     // 9. Launch the agent
     let allowed_tools = build_allowed_tools(&conventions, &opts.verify);
+    let agent_type = opts
+        .agent_type
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| crate::utils::read_agent_type(crosslink_dir));
 
     match &opts.container {
         ContainerMode::None => {
@@ -208,6 +233,7 @@ pub fn run(
 
             launch_local(
                 &opts.agent_binary,
+                &agent_type,
                 &worktree_dir,
                 &session_name,
                 opts.model,
@@ -248,6 +274,7 @@ pub fn run(
             let container_id = launch_container(
                 mode,
                 &opts.agent_binary,
+                &agent_type,
                 &worktree_dir,
                 &root,
                 opts.image,

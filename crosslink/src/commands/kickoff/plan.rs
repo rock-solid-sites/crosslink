@@ -231,8 +231,10 @@ pub fn plan(crosslink_dir: &Path, db: &Database, opts: &PlanOpts) -> Result<()> 
     let claude_config_dir = std::env::var("CLAUDE_CONFIG_DIR").ok();
 
     // Plan mode reads PLAN_KICKOFF.md instead of KICKOFF.md
+    let agent_type = crate::utils::read_agent_type(crosslink_dir);
     let cmd = build_agent_command(
         &opts.agent_binary,
+        &agent_type,
         preflight.timeout_cmd,
         opts.timeout.as_secs(),
         opts.model,

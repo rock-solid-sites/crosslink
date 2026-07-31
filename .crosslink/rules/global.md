@@ -114,6 +114,7 @@ These rules ensure code works correctly. They yield only to security concerns.
 - **Error handling**: Proper error handling everywhere. No panics or crashes on bad input.
 - **No dead code**: Intelligently deal with dead code. If its a hallucinated function remove it. If its an unfinished function complete it. 
 - **Test after changes**: Run the project's test suite after making code changes.
+- **Memory awareness**: This VPS has 8GB RAM. Sessions with fan-out subagents can spike to 3GB+. See knowledge page `server-memory-management` for the three-layer defense (systemd scope, earlyoom, zram) and cleanup rules. Never run unbounded background processes without checking memory impact.
 
 ### Documentation Trail (MANDATORY — AUDIT REQUIREMENT)
 

@@ -27,6 +27,8 @@ pub struct ExportedIssue {
     pub created_at: String,
     pub updated_at: String,
     pub closed_at: Option<String>,
+    #[serde(default)]
+    pub created_by: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]

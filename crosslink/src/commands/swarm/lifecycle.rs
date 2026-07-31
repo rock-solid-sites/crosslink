@@ -726,12 +726,15 @@ pub fn launch(
         let issue_id = phase.agents[*idx].issue_id;
         let branch = phase.agents[*idx].branch.clone();
 
+        let phase_agent_type =
+            crate::utils::read_phase_agent_type(crosslink_dir, &phase.name);
+
         let opts = KickoffOpts {
             description: &description,
             issue: issue_id,
             container: ContainerMode::None,
             verify: VerifyLevel::Local,
-            model: "opus",
+            model: &crate::utils::read_agent_model(crosslink_dir),
             image: kickoff::DEFAULT_AGENT_IMAGE,
             timeout: std::time::Duration::from_secs(3600),
             dry_run: false,
@@ -742,6 +745,7 @@ pub fn launch(
             skip_permissions: false,
             permission_mode: None,
             agent_binary: crate::utils::read_agent_binary(crosslink_dir),
+            agent_type: Some(&phase_agent_type),
         };
 
         match kickoff::run(crosslink_dir, db, writer, &opts) {

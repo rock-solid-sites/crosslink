@@ -172,6 +172,7 @@ pub(super) fn spawn_watchdog(
 #[allow(clippy::too_many_arguments)]
 pub(super) fn build_agent_command(
     agent_binary: &str,
+    agent_type: &str,
     timeout_cmd: &str,
     timeout_secs: u64,
     model: &str,
@@ -185,24 +186,20 @@ pub(super) fn build_agent_command(
 ) -> String {
     use crate::utils::shell_escape_arg;
 
-    // Resolve permission posture for the spawned claude session:
-    //   1. `permission_mode`, if given, emits `--permission-mode <value>`.
-    //      Claude supports `acceptEdits`, `auto`, `bypassPermissions`,
-    //      `default`, `dontAsk`, `plan` (see GH#603).
-    //   2. Otherwise, `skip_permissions = true` emits the legacy
-    //      `--dangerously-skip-permissions` (full bypass).
-    //   3. Otherwise no flag — claude prompts for every tool.
-    // CLI parsing in main.rs marks `--permission-mode` as
-    // `conflicts_with("skip_permissions")` so reaching case 1 with
-    // `skip_permissions = true` is impossible from the public surface;
-    // internal callers (the wizard's WizardStage::Run path) pass both
-    // as defaults (None / false) and let this resolution stand.
-    let permission_flag_owned: String = match (permission_mode, skip_permissions) {
-        (Some(mode), _) if !mode.is_empty() => {
-            format!(" --permission-mode {}", shell_escape_arg(mode))
+    // Resolve permission posture for the spawned agent session:
+    // Only Claude supports these permission flags — non-Claude agents
+    // receive an empty skip_flag. The claude wrapper drops these anyway,
+    // but gating here avoids passing unrecognized flags.
+    let permission_flag_owned: String = if agent_binary == "claude" {
+        match (permission_mode, skip_permissions) {
+            (Some(mode), _) if !mode.is_empty() => {
+                format!(" --permission-mode {}", shell_escape_arg(mode))
+            }
+            (_, true) => " --dangerously-skip-permissions".to_string(),
+            _ => String::new(),
         }
-        (_, true) => " --dangerously-skip-permissions".to_string(),
-        _ => String::new(),
+    } else {
+        String::new()
     };
     let skip_flag = permission_flag_owned.as_str();
     // Fold `CLAUDE_CONFIG_DIR=val` into env(1)'s argv so the assignment takes
@@ -223,9 +220,10 @@ pub(super) fn build_agent_command(
     let escaped_model = shell_escape_arg(model);
     let escaped_tools = shell_escape_arg(allowed_tools);
     let escaped_kickoff = shell_escape_arg(kickoff_file);
+    let escaped_agent = shell_escape_arg(agent_type);
     let claude_cmd = if agent_binary == "claude" {
         format!(
-            "env -u CLAUDECODE {env_assignment}{agent_binary}{skip_flag} --model {escaped_model} --allowedTools {escaped_tools} -- \"$(cat {escaped_kickoff})\""
+            "env -u CLAUDECODE {env_assignment}{agent_binary}{skip_flag} --model {escaped_model} --agent {escaped_agent} --allowedTools {escaped_tools} -- \"$(cat {escaped_kickoff})\""
         )
     } else {
         // Non-Claude agents: pipe the prompt via stdin, no --model/--allowedTools flags
@@ -593,6 +591,7 @@ pub(super) fn exclude_kickoff_files(worktree_dir: &Path) -> Result<()> {
 #[allow(clippy::too_many_arguments)]
 pub(super) fn launch_local(
     agent_binary: &str,
+    agent_type: &str,
     worktree_dir: &Path,
     session_name: &str,
     model: &str,
@@ -631,6 +630,7 @@ pub(super) fn launch_local(
     // Build the claude command (with optional sandbox wrapping)
     let cmd = build_agent_command(
         agent_binary,
+        agent_type,
         timeout_cmd,
         timeout.as_secs(),
         model,
@@ -691,6 +691,7 @@ pub(super) fn launch_local(
 pub(super) fn launch_container(
     runtime: &ContainerMode,
     agent_binary: &str,
+    agent_type: &str,
     worktree_dir: &Path,
     host_repo_root: &Path,
     image: &str,
@@ -819,7 +820,7 @@ pub(super) fn launch_container(
     args.push("-c".to_string());
     if agent_binary == "claude" {
         args.push(format!(
-            "cd /workspaces/repo && timeout {timeout_secs}s {agent_binary} --model {model} --allowedTools '{allowed_tools}' -- \"$(cat KICKOFF.md)\""
+            "cd /workspaces/repo && timeout {timeout_secs}s {agent_binary} --model {model} --agent {agent_type} --allowedTools '{allowed_tools}' -- \"$(cat KICKOFF.md)\""
         ));
     } else {
         // Non-Claude agents: pipe the prompt via stdin

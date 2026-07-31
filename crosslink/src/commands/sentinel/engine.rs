@@ -478,6 +478,7 @@ fn spawn_agent(
         skip_permissions: true,
         permission_mode: None,
         agent_binary: crate::utils::read_agent_binary(crosslink_dir),
+        agent_type: None,
     };
 
     run(crosslink_dir, db, writer, &opts)

@@ -92,6 +92,7 @@ pub fn dispatch(
                 skip_permissions,
                 permission_mode: permission_mode.as_deref(),
                 agent_binary: crate::utils::read_agent_binary(crosslink_dir),
+                agent_type: None,
             };
             // The pipeline "running" row is now written from inside `run()`
             // once the real worktree + agent identity exist (GH#614) — no more
@@ -281,6 +282,7 @@ fn dispatch_launch(
             skip_permissions,
             permission_mode,
             agent_binary: crate::utils::read_agent_binary(crosslink_dir),
+            agent_type: None,
         };
         // mark_running is now invoked from inside run() with the real identity.
         run(crosslink_dir, db, writer, &opts)?;
@@ -365,6 +367,7 @@ fn dispatch_launch(
                 skip_permissions: false,
                 permission_mode: None,
                 agent_binary: crate::utils::read_agent_binary(crosslink_dir),
+                agent_type: None,
             };
             run(crosslink_dir, db, writer, &opts)?;
             Ok(())

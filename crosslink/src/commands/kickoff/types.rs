@@ -100,6 +100,9 @@ pub struct KickoffOpts<'a> {
     /// Agent binary to launch (read from hook-config.json `agent.binary`,
     /// default "claude"). Allows pointing kickoff at a different agent CLI.
     pub agent_binary: String,
+    /// Agent type to use (overrides hook-config.json `agent.type`).
+    /// When `None`, falls back to `read_agent_type()` at launch time.
+    pub agent_type: Option<&'a str>,
 }
 
 /// A single criterion verdict in the validation report.

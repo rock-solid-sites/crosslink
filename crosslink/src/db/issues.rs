@@ -13,6 +13,9 @@ impl Database {
 
     /// Create a new issue with the given title, optional description, and priority.
     ///
+    /// The `created_by` column is left NULL (the issue is attributed to the
+    /// local SQLite store rather than a specific agent).
+    ///
     /// # Errors
     /// Returns an error if the priority is invalid, the title or description
     /// exceeds maximum length, or the database insert fails.
@@ -25,7 +28,26 @@ impl Database {
         self.create_issue_with_parent(title, description, priority, None)
     }
 
+    /// Create a new issue, attributing it to the given author via `created_by`.
+    ///
+    /// Used by the import command to preserve authorship from the source JSON.
+    ///
+    /// # Errors
+    /// Returns an error if the priority is invalid, the title or description
+    /// exceeds maximum length, or the database insert fails.
+    pub fn create_issue_with_author(
+        &self,
+        title: &str,
+        description: Option<&str>,
+        priority: &str,
+        created_by: Option<&str>,
+    ) -> Result<i64> {
+        self.create_issue_with_parent_and_author(title, description, priority, None, created_by)
+    }
+
     /// Create a new subissue under the given parent issue.
+    ///
+    /// The `created_by` column is left NULL.
     ///
     /// # Errors
     /// Returns an error if the priority is invalid, the title or description
@@ -41,12 +63,48 @@ impl Database {
         self.create_issue_with_parent(title, description, priority, Some(parent_id))
     }
 
+    /// Create a new subissue, attributing it to the given author via `created_by`.
+    ///
+    /// Used by the import command to preserve authorship from the source JSON.
+    ///
+    /// # Errors
+    /// Returns an error if the priority is invalid, the title or description
+    /// exceeds maximum length, or the database insert fails.
+    pub fn create_subissue_with_author(
+        &self,
+        parent_id: i64,
+        title: &str,
+        description: Option<&str>,
+        priority: &str,
+        created_by: Option<&str>,
+    ) -> Result<i64> {
+        let parent_id = self.resolve_id(parent_id);
+        self.create_issue_with_parent_and_author(
+            title,
+            description,
+            priority,
+            Some(parent_id),
+            created_by,
+        )
+    }
+
     fn create_issue_with_parent(
         &self,
         title: &str,
         description: Option<&str>,
         priority: &str,
         parent_id: Option<i64>,
+    ) -> Result<i64> {
+        self.create_issue_with_parent_and_author(title, description, priority, parent_id, None)
+    }
+
+    fn create_issue_with_parent_and_author(
+        &self,
+        title: &str,
+        description: Option<&str>,
+        priority: &str,
+        parent_id: Option<i64>,
+        created_by: Option<&str>,
     ) -> Result<i64> {
         validate_priority(priority)?;
         if title.len() > MAX_TITLE_LEN {
@@ -60,8 +118,8 @@ impl Database {
         let now = Utc::now().to_rfc3339();
         let uuid = uuid::Uuid::new_v4().to_string();
         self.conn.execute(
-            "INSERT INTO issues (title, description, priority, parent_id, status, created_at, updated_at, uuid) VALUES (?1, ?2, ?3, ?4, 'open', ?5, ?5, ?6)",
-            params![title, description, priority, parent_id, now, uuid],
+            "INSERT INTO issues (title, description, priority, parent_id, status, created_at, updated_at, uuid, created_by) VALUES (?1, ?2, ?3, ?4, 'open', ?5, ?5, ?6, ?7)",
+            params![title, description, priority, parent_id, now, uuid, created_by],
         )?;
         Ok(self.conn.last_insert_rowid())
     }

@@ -146,10 +146,11 @@ fn import_issue_files(db: &Database, issues: &[IssueFile], input_path: &Path) ->
 
         // First pass: create all issues without parent relationships
         for issue in issues {
-            let new_id = db.create_issue(
+            let new_id = db.create_issue_with_author(
                 &issue.title,
                 issue.description.as_deref(),
                 issue.priority.as_str(),
+                Some(&issue.created_by),
             )?;
 
             // Add labels
@@ -244,17 +245,19 @@ fn import_legacy(db: &Database, data: &ExportData, input_path: &Path) -> Result<
 
 fn import_issue(db: &Database, issue: &ExportedIssue, parent_id: Option<i64>) -> Result<i64> {
     let id = if let Some(pid) = parent_id {
-        db.create_subissue(
+        db.create_subissue_with_author(
             pid,
             &issue.title,
             issue.description.as_deref(),
             issue.priority.as_str(),
+            issue.created_by.as_deref(),
         )?
     } else {
-        db.create_issue(
+        db.create_issue_with_author(
             &issue.title,
             issue.description.as_deref(),
             issue.priority.as_str(),
+            issue.created_by.as_deref(),
         )?
     };
 
@@ -318,6 +321,7 @@ mod tests {
             created_at: "2024-01-01T00:00:00Z".to_string(),
             updated_at: "2024-01-01T00:00:00Z".to_string(),
             closed_at: None,
+            created_by: None,
         }
     }
 
@@ -432,6 +436,58 @@ mod tests {
         assert_eq!(issues[0].title, "New format issue");
         let labels = db.get_labels(issues[0].id).unwrap();
         assert!(labels.contains(&"feature".to_string()));
+        // created_by from the import JSON must be preserved in the DB column.
+        let (_, created_by) = db.get_issue_export_metadata(issues[0].id).unwrap();
+        assert_eq!(created_by.as_deref(), Some("test"));
+    }
+
+    #[test]
+    fn test_import_issue_file_preserves_created_by() {
+        let (db, dir) = setup_test_db();
+        let issue = IssueFile {
+            uuid: uuid::Uuid::new_v4(),
+            display_id: Some(1),
+            title: "Authored issue".to_string(),
+            description: None,
+            status: crate::models::IssueStatus::Open,
+            priority: crate::models::Priority::Medium,
+            parent_uuid: None,
+            created_by: "agent-7".to_string(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            closed_at: None,
+            scheduled_at: None,
+            due_at: None,
+            labels: vec![],
+            comments: vec![],
+            blockers: vec![],
+            related: vec![],
+            milestone_uuid: None,
+            time_entries: vec![],
+        };
+        let json = serde_json::to_string_pretty(&vec![issue]).unwrap();
+        let import_path = dir.path().join("import.json");
+        fs::write(&import_path, &json).unwrap();
+        run_json(&db, &import_path).unwrap();
+        let issues = db.list_issues(Some("all"), None, None).unwrap();
+        assert_eq!(issues.len(), 1);
+        let (_, created_by) = db.get_issue_export_metadata(issues[0].id).unwrap();
+        assert_eq!(created_by.as_deref(), Some("agent-7"));
+    }
+
+    #[test]
+    fn test_import_legacy_preserves_created_by() {
+        let (db, dir) = setup_test_db();
+        let mut issue = make_issue(1, "Legacy authored", None, "open");
+        issue.created_by = Some("legacy-agent".to_string());
+        let json = create_test_export(vec![issue]);
+        let import_path = dir.path().join("import.json");
+        fs::write(&import_path, json).unwrap();
+        run_json(&db, &import_path).unwrap();
+        let issues = db.list_issues(Some("all"), None, None).unwrap();
+        assert_eq!(issues.len(), 1);
+        let (_, created_by) = db.get_issue_export_metadata(issues[0].id).unwrap();
+        assert_eq!(created_by.as_deref(), Some("legacy-agent"));
     }
 
     proptest! {

@@ -1,6 +1,6 @@
 {
   "next_display_id": 796,
-  "next_comment_id": 1138,
+  "next_comment_id": 1139,
   "display_id_map": {
     "00a365a3-7b31-465a-aced-4f1e39c68f8b": 118,
     "01b74b94-82e0-4bda-9bed-7eace0292544": 70,
@@ -22448,11 +22448,20 @@
       "priority": "high",
       "created_by": "driver",
       "created_at": "2026-07-31T19:40:58.029922318Z",
-      "updated_at": "2026-07-31T19:41:08.643421549Z",
+      "updated_at": "2026-07-31T22:25:49.429874589Z",
       "labels": [
         "bug"
       ],
       "comments": {
+        "3643a872-edbf-45da-b55d-c18dab8f8313": {
+          "display_id": 1138,
+          "author": "driver",
+          "content": "Verified fix: set tracker_remote=fork via 'crosslink config set tracker_remote fork'. On next event, the driver's own-ref pushed to fork (refs/heads/crosslink/agents/driver, seq 16), delivering all previously-local-only events (#786-#795) to the fork hub. Sync completes without 403. Note: the crosslink/hub branch still tracks origin (dollspace-gay) as upstream for branch-tracking purposes, but event pushes now go to fork.",
+          "created_at": "2026-07-31T22:25:49.423076513Z",
+          "kind": "result",
+          "signed_by": "SHA256:cx5PuRP0j7pktPKktl0WwbMp5uEwfFy9WoiBcgyhe18",
+          "signature": "U1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAguEQKo5PmNONBqYSfFi6Ry6tvLy9D5GLM9YcPkF7QNdoAAAARY3Jvc3NsaW5rLWNvbW1lbnQAAAAAAAAABnNoYTUxMgAAAFMAAAALc3NoLWVkMjU1MTkAAABArikr7YfOeReBWwunnlZoTEEe792SqTrgL51raM6tKAGZBLW5K7L63F8tnoUhpVK4WQdJ7Gl4r9aTQaOsjIMhCA=="
+        },
         "c5a4a6f4-54c0-4b15-b342-b9960301c958": {
           "display_id": 1123,
           "author": "driver",
@@ -24978,11 +24987,16 @@
       "agent_id": "driver",
       "agent_seq": 16,
       "timestamp": "2026-07-31T22:25:29.243571867Z"
+    },
+    {
+      "agent_id": "driver",
+      "agent_seq": 17,
+      "timestamp": "2026-07-31T22:25:49.429874589Z"
     }
   ],
   "watermark": {
-    "timestamp": "2026-07-31T22:25:29.243571867Z",
+    "timestamp": "2026-07-31T22:25:49.429874589Z",
     "agent_id": "driver",
-    "agent_seq": 16
+    "agent_seq": 17
   }
 }

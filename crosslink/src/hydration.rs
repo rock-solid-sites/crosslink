@@ -349,7 +349,21 @@ pub fn hydrate_from_state(
         .collect::<std::result::Result<Vec<_>, _>>()?;
     let sqlite_only_rows: Vec<SavedIssue> = all_rows
         .into_iter()
-        .filter(|row| !state_uuids.contains(&row.uuid) && row.created_by.is_none())
+        .filter(|row| {
+            // Preserve SQLite-only issues: rows whose uuid is absent from the
+            // reduced state AND not tombstoned. This covers both direct-SQLite
+            // rows (created_by = NULL, the GH#4 stranded population) and
+            // fork-authored rows (created_by set) whose events were local-only
+            // at hydrate time — dropping either would lose data.
+            // Tombstoned uuids are excluded so a deliberately deleted issue is
+            // never resurrected.
+            if state_uuids.contains(&row.uuid) {
+                return false;
+            }
+            uuid::Uuid::parse_str(&row.uuid)
+                .map(|u| !state.deleted_issues.contains(&u))
+                .unwrap_or(true)
+        })
         .collect();
     if !sqlite_only_rows.is_empty() {
         tracing::info!(
@@ -1239,11 +1253,13 @@ fn hub_head_ref(crosslink_dir: &Path) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::checkpoint::CompactIssue;
     use crate::issue_file::{
         write_comment_file, write_issue_file, write_layout_version, CommentEntry, CommentFile,
         IssueFile, TimeEntry,
     };
     use chrono::Utc;
+    use std::collections::BTreeSet;
     use tempfile::tempdir;
     use uuid::Uuid;
 
@@ -2134,5 +2150,70 @@ mod tests {
         let loaded_parent = db.get_issue(-1).unwrap();
         let loaded_child = db.get_issue(-2).unwrap();
         assert!(loaded_parent.is_some() || loaded_child.is_some());
+    }
+
+    #[test]
+    fn test_hydrate_preserves_fork_authored_sqlite_only_issue() {
+        // Regression: fork-authored issues (create_issue_with_author sets
+        // created_by) must be preserved when absent from the reduced state.
+        // The old created_by IS NULL filter dropped them — the data-loss trap
+        // behind ASES #119.
+        let (db, _dir) = setup_test_db();
+        let id = db
+            .create_issue_with_author("fork issue", None, "medium", Some("agent-7"))
+            .unwrap();
+
+        // Reduced state that does NOT contain this issue's uuid (simulates a
+        // stale/behind checkpoint at hydrate time).
+        let state = crate::checkpoint::CheckpointState::default();
+        crate::hydration::hydrate_from_state(&state, &db).unwrap();
+
+        // Issue must still be present: it is SQLite-only and not tombstoned.
+        assert!(
+            db.get_issue(id).unwrap().is_some(),
+            "fork-authored SQLite-only issue must survive a stale-state hydrate"
+        );
+
+        // Tombstoned uuids must NOT be resurrected. Use a state with ONE live
+        // issue (so the empty-state early-return guard does not short-circuit)
+        // plus the target uuid in deleted_issues.
+        let deleted_uuid = db
+            .get_issue_uuid_by_id(id)
+            .expect("issue uuid")
+            .parse::<Uuid>()
+            .unwrap();
+        let live = CompactIssue {            uuid: Uuid::new_v4(),
+            display_id: Some(999),
+            title: "live".to_string(),
+            description: None,
+            status: crate::models::IssueStatus::Open,
+            priority: crate::models::Priority::Medium,
+            parent_uuid: None,
+            created_by: "agent-live".to_string(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            closed_at: None,
+            scheduled_at: None,
+            due_at: None,
+            labels: BTreeSet::new(),
+            blockers: BTreeSet::new(),
+            related: BTreeSet::new(),
+            milestone_uuid: None,
+            comments: std::collections::BTreeMap::new(),
+            time_entries: std::collections::BTreeMap::new(),
+        };
+        let mut state_with_tombstone = crate::checkpoint::CheckpointState::default();
+        state_with_tombstone.issues.insert(live.uuid, live);
+        state_with_tombstone.deleted_issues.insert(deleted_uuid);
+        crate::hydration::hydrate_from_state(&state_with_tombstone, &db).unwrap();
+        let count: i64 = db
+            .conn
+            .query_row("SELECT COUNT(*) FROM issues", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 1, "only the live issue remains; tombstoned one dropped");
+        assert!(
+            db.get_issue(id).unwrap().is_none(),
+            "tombstoned issue must not be resurrected"
+        );
     }
 }

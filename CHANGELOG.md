@@ -14,6 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   kept writing after an earlier migration (forecast-bio/crosslink#653).
 
 ### Changed
+- tracker_remote=fork verification (#795)
 
 - `crosslink migrate hub-v3` now guards against silently adopting a **stale**
   remote v3 hub. Before adopting, it compares the remote's genesis against the
@@ -24,6 +25,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   can never escalate to real data loss (forecast-bio/crosslink#653).
 
 ### Fixed
+- Fix tracker_remote to writable fork remote so local-only issues survive sync (#794)
 
 - `crosslink integrity` no longer false-FAILs `counters` and `hydration` on a
   v3 hub. Both checks read legacy v2 worktree artifacts (meta/counters.json,

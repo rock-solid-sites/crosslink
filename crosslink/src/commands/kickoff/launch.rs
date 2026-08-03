@@ -86,6 +86,14 @@ pub(super) fn read_watchdog_config(crosslink_dir: &Path) -> WatchdogConfig {
 
 /// Build the watchdog shell script that monitors heartbeat staleness and
 /// nudges idle agents by sending "continue" via tmux send-keys.
+///
+/// The script disarms when the agent reaches a TERMINAL state — the
+/// `.kickoff-status` file's CONTENT starts with `DONE`, `FAILED`,
+/// `CI_FAILED`, or `TIMEOUT` — not when the file merely exists. Checking
+/// existence alone is wrong because `launch` writes `LAUNCHING`/`RUNNING`
+/// into the file before the watchdog even starts, which would make the
+/// watchdog exit on its first check and leave the staleness-nudge logic
+/// dead (fork bug #138).
 pub(super) fn build_watchdog_script(
     session_name: &str,
     worktree_dir: &Path,
@@ -97,7 +105,12 @@ pub(super) fn build_watchdog_script(
 sleep {grace}
 while true; do
     sleep {interval}
-    if [ -f "{worktree}/.kickoff-status" ]; then exit 0; fi
+    if [ -f "{worktree}/.kickoff-status" ]; then
+        STATUS=$(cat "{worktree}/.kickoff-status" 2>/dev/null)
+        case "$STATUS" in
+            DONE*|FAILED*|CI_FAILED*|TIMEOUT*) exit 0 ;;
+        esac
+    fi
     if ! tmux has-session -t "{session}" 2>/dev/null; then exit 0; fi
     HB="{worktree}/.crosslink/.cache/last-heartbeat"
     if [ -f "$HB" ]; then

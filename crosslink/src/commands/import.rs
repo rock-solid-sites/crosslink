@@ -468,7 +468,7 @@ mod tests {
         let json = serde_json::to_string_pretty(&vec![issue]).unwrap();
         let import_path = dir.path().join("import.json");
         fs::write(&import_path, &json).unwrap();
-        run_json(&db, &import_path).unwrap();
+        run_json(&db, None, &import_path).unwrap();
         let issues = db.list_issues(Some("all"), None, None).unwrap();
         assert_eq!(issues.len(), 1);
         let (_, created_by) = db.get_issue_export_metadata(issues[0].id).unwrap();
@@ -483,7 +483,7 @@ mod tests {
         let json = create_test_export(vec![issue]);
         let import_path = dir.path().join("import.json");
         fs::write(&import_path, json).unwrap();
-        run_json(&db, &import_path).unwrap();
+        run_json(&db, None, &import_path).unwrap();
         let issues = db.list_issues(Some("all"), None, None).unwrap();
         assert_eq!(issues.len(), 1);
         let (_, created_by) = db.get_issue_export_metadata(issues[0].id).unwrap();

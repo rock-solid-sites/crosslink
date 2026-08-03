@@ -2730,7 +2730,154 @@ fn test_build_watchdog_script_contains_key_elements() {
     assert!(script.contains("NUDGES"));
     assert!(script.contains("-gt 300")); // staleness threshold
     assert!(script.contains("-ge 3")); // max nudges
+    // Fork bug #138: the script must disarm on TERMINAL status CONTENT, not
+    // on mere file existence (the file exists from LAUNCHING onward, so an
+    // existence check made the watchdog exit on its very first iteration).
+    assert!(
+        script.contains("DONE*|FAILED*|CI_FAILED*|TIMEOUT*"),
+        "watchdog must exit on terminal .kickoff-status content, not file existence"
+    );
+    assert!(
+        !script.contains("[ -f {worktree}/.kickoff-status ]"),
+        "watchdog must not exit merely because .kickoff-status exists"
+    );
 }
+
+// ---------------------------------------------------------------------------
+// Fork bug #138: watchdog exit-condition regression tests
+//
+// The old script exited 0 whenever `.kickoff-status` existed, but `launch`
+// writes LAUNCHING/RUNNING into the file BEFORE the watchdog starts, so the
+// watchdog always disarmed on its first check and the staleness-nudge logic
+// was dead code. These tests execute the generated script end-to-end with a
+// fake `tmux` on PATH and assert:
+//   1. terminal status content (DONE/FAILED/CI_FAILED) disarms without nudging;
+//   2. non-terminal content (RUNNING) does NOT disarm — a stale heartbeat
+//      produces a real tmux send-keys nudge (and max_nudges exit 1).
+// ---------------------------------------------------------------------------
+
+/// Write a fake `tmux` shim that logs every invocation to `$FAKE_TMUX_LOG`
+/// and exits 0 (simulating an alive session). Returns the shim directory.
+#[cfg(unix)]
+fn write_fake_tmux(dir: &Path, log_path: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+    let shim = dir.join("tmux");
+    std::fs::write(
+        &shim,
+        "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$FAKE_TMUX_LOG\"\nexit 0\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let _ = log_path;
+}
+
+/// Create a stale heartbeat file (mtime 2000-01-01) so staleness always trips.
+fn write_stale_heartbeat(worktree: &Path) {
+    let hb_dir = worktree.join(".crosslink").join(".cache");
+    std::fs::create_dir_all(&hb_dir).unwrap();
+    std::fs::write(hb_dir.join("last-heartbeat"), "2000-01-01T00:00:00Z").unwrap();
+    let status = std::process::Command::new("touch")
+        .arg("-t")
+        .arg("200001010000")
+        .arg(hb_dir.join("last-heartbeat"))
+        .status()
+        .unwrap();
+    assert!(status.success(), "touch -t failed on test host");
+}
+
+/// Run a watchdog script built with `cfg` against `worktree`, with the fake
+/// tmux shim (logging to `tmux_log`) on PATH. Returns the process output.
+#[cfg(unix)]
+fn run_watchdog_script(
+    worktree: &Path,
+    cfg: &WatchdogConfig,
+    shim_dir: &Path,
+    tmux_log: &Path,
+) -> std::process::Output {
+    let script = build_watchdog_script("feat-test-agent", worktree, cfg);
+    let path = format!(
+        "{}:{}",
+        shim_dir.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    std::process::Command::new("bash")
+        .arg("-c")
+        .arg(script)
+        .env("PATH", &path)
+        .env("FAKE_TMUX_LOG", tmux_log)
+        .output()
+        .expect("failed to spawn bash for watchdog script")
+}
+
+#[test]
+#[cfg(unix)]
+fn test_watchdog_exits_on_terminal_status_without_nudging() {
+    // Regression for fork bug #138: with terminal status content the watchdog
+    // must exit 0 at the status check — and must NOT have sent any nudge.
+    for status in ["DONE", "FAILED", "CI_FAILED", "TIMEOUT"] {
+        let wt = tempfile::tempdir().unwrap();
+        let shim = tempfile::tempdir().unwrap();
+        let log_path = shim.path().join("tmux.log");
+        write_fake_tmux(shim.path(), &log_path);
+        std::fs::write(wt.path().join(".kickoff-status"), format!("{status}\n")).unwrap();
+        let cfg = WatchdogConfig {
+            enabled: true,
+            staleness_secs: 1,
+            max_nudges: 1,
+            check_interval_secs: 1,
+            grace_period_secs: 0,
+        };
+        let out = run_watchdog_script(wt.path(), &cfg, shim.path(), &log_path);
+        assert!(
+            out.status.success(),
+            "watchdog should exit 0 for terminal status {status:?}, got {:?} (stderr: {})",
+            out.status.code(),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let log = std::fs::read_to_string(&log_path).unwrap_or_default();
+        assert!(
+            !log.contains("send-keys"),
+            "watchdog must not nudge after terminal status {status:?}; tmux log: {log}"
+        );
+    }
+}
+
+#[test]
+#[cfg(unix)]
+fn test_watchdog_nudges_on_stale_heartbeat_while_running() {
+    // Regression for fork bug #138: the watchdog must NOT exit merely because
+    // `.kickoff-status` exists. With RUNNING content + a stale heartbeat the
+    // script must reach the nudge branch, send-keys a "continue working"
+    // message, and give up (exit 1) once max_nudges is exhausted. The old
+    // buggy script exited 0 on the first check with no nudge at all.
+    let wt = tempfile::tempdir().unwrap();
+    let shim = tempfile::tempdir().unwrap();
+    let log_path = shim.path().join("tmux.log");
+    write_fake_tmux(shim.path(), &log_path);
+    std::fs::write(wt.path().join(".kickoff-status"), "RUNNING\n").unwrap();
+    write_stale_heartbeat(wt.path());
+    let cfg = WatchdogConfig {
+        enabled: true,
+        staleness_secs: 1,
+        max_nudges: 1,
+        check_interval_secs: 1,
+        grace_period_secs: 0,
+    };
+    let out = run_watchdog_script(wt.path(), &cfg, shim.path(), &log_path);
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "watchdog should exit 1 after exhausting max_nudges (stderr: {})",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let log = std::fs::read_to_string(&log_path).unwrap_or_default();
+    assert!(
+        log.contains("send-keys") && log.contains("continue working"),
+        "watchdog should have nudged the stale agent via tmux send-keys; tmux log: {log}"
+    );
+    assert_eq!(log.matches("send-keys").count(), 1, "expected exactly one nudge (max_nudges=1); tmux log: {log}");
+}
+
 
 // ---------------------------------------------------------------------------
 // GH#614: pipeline `runs` reconciliation

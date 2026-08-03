@@ -20544,7 +20544,10 @@
       "priority": "medium",
       "created_by": "driver",
       "created_at": "2026-08-03T06:09:20.443593573Z",
-      "updated_at": "2026-08-03T06:09:20.443593573Z"
+      "updated_at": "2026-08-03T06:09:29.672394378Z",
+      "labels": [
+        "feature"
+      ]
     },
     "d0b59565-5ba7-4ca1-bcf3-0c2f30807d71": {
       "uuid": "d0b59565-5ba7-4ca1-bcf3-0c2f30807d71",
@@ -25046,11 +25049,16 @@
       "agent_id": "driver",
       "agent_seq": 21,
       "timestamp": "2026-08-03T06:09:25.522581807Z"
+    },
+    {
+      "agent_id": "driver",
+      "agent_seq": 22,
+      "timestamp": "2026-08-03T06:09:29.672394378Z"
     }
   ],
   "watermark": {
-    "timestamp": "2026-08-03T06:09:25.522581807Z",
+    "timestamp": "2026-08-03T06:09:29.672394378Z",
     "agent_id": "driver",
-    "agent_seq": 21
+    "agent_seq": 22
   }
 }

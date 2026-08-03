@@ -64,6 +64,7 @@ pub fn dispatch(
             doc,
             skip_permissions,
             permission_mode,
+            agent_type,
         } => {
             let parsed_doc = if let Some(ref path) = doc {
                 let content = std::fs::read_to_string(path)
@@ -92,7 +93,7 @@ pub fn dispatch(
                 skip_permissions,
                 permission_mode: permission_mode.as_deref(),
                 agent_binary: crate::utils::read_agent_binary(crosslink_dir),
-                agent_type: None,
+                agent_type: agent_type.as_deref(),
             };
             // The pipeline "running" row is now written from inside `run()`
             // once the real worktree + agent identity exist (GH#614) — no more

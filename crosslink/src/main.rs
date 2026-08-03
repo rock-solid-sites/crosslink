@@ -1706,6 +1706,14 @@ enum KickoffCommands {
             conflicts_with = "skip_permissions"
         )]
         permission_mode: Option<String>,
+        /// Agent type to launch as (e.g. builder, reviewer, auditor).
+        ///
+        /// Overrides hook-config.json's `agent.type` for this launch. This is
+        /// what makes kickoff-dispatched reviewer/auditor agents inherit the
+        /// corresponding permission surface (`by_type` overrides) instead of
+        /// always launching under the default builder type.
+        #[arg(long, value_name = "TYPE")]
+        agent_type: Option<String>,
     },
     /// Check status of a running kickoff agent (no args = pipeline overview)
     Status {

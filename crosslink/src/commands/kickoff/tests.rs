@@ -1950,6 +1950,42 @@ fn test_build_agent_command_plan_kickoff() {
 }
 
 #[test]
+fn test_build_agent_command_with_non_builder_agent_type() {
+    // GH#139: `--agent-type reviewer` on `kickoff run` must surface as the
+    // claude `--agent` flag so reviewer/auditor agents get their role's
+    // permission surface instead of always launching under the default
+    // builder type.
+    for (agent_type, expected) in [
+        ("reviewer", "--agent 'reviewer'"),
+        ("auditor", "--agent 'auditor'"),
+        ("orchestrator", "--agent 'orchestrator'"),
+    ] {
+        let cmd = build_agent_command(
+            "claude",
+            agent_type,
+            "timeout",
+            3600,
+            "opus",
+            "Read",
+            "KICKOFF.md",
+            None,
+            Path::new("/tmp/worktree"),
+            false,
+            None,
+            None,
+        );
+        assert!(
+            cmd.contains(expected),
+            "agent_type={agent_type} should emit {expected}, got: {cmd}"
+        );
+        assert!(
+            !cmd.contains("--agent 'builder'"),
+            "agent_type={agent_type} must not fall back to builder, got: {cmd}"
+        );
+    }
+}
+
+#[test]
 fn test_build_agent_command_propagates_claude_config_dir() {
     // When the caller has CLAUDE_CONFIG_DIR set, it must be baked into the
     // shell command string so it bypasses tmux's frozen-at-startup env

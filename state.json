@@ -5871,21 +5871,6 @@
         }
       }
     },
-    "34b3c889-3315-4812-86d6-e5ed4dc00937": {
-      "uuid": "34b3c889-3315-4812-86d6-e5ed4dc00937",
-      "display_id": 796,
-      "title": "test feature",
-      "description": "Created by crosslink kickoff",
-      "status": "closed",
-      "priority": "medium",
-      "created_by": "driver",
-      "created_at": "2026-08-03T06:09:15.135467977Z",
-      "updated_at": "2026-08-03T06:10:23.062362261Z",
-      "closed_at": "2026-08-03T06:10:23.062327186Z",
-      "labels": [
-        "feature"
-      ]
-    },
     "359032b3-ce4c-4ddc-bcba-ef8b2a3f851b": {
       "uuid": "359032b3-ce4c-4ddc-bcba-ef8b2a3f851b",
       "display_id": 355,
@@ -24765,6 +24750,9 @@
       }
     }
   },
+  "deleted_issues": [
+    "34b3c889-3315-4812-86d6-e5ed4dc00937"
+  ],
   "next_milestone_id": 1,
   "unsigned_event_warnings": [
     {
@@ -25066,11 +25054,16 @@
       "agent_id": "driver",
       "agent_seq": 24,
       "timestamp": "2026-08-03T06:10:27.198425511Z"
+    },
+    {
+      "agent_id": "driver",
+      "agent_seq": 25,
+      "timestamp": "2026-08-03T06:11:04.907067156Z"
     }
   ],
   "watermark": {
-    "timestamp": "2026-08-03T06:10:27.198425511Z",
+    "timestamp": "2026-08-03T06:11:04.907067156Z",
     "agent_id": "driver",
-    "agent_seq": 24
+    "agent_seq": 25
   }
 }

@@ -245,6 +245,7 @@ pub fn plan(crosslink_dir: &Path, db: &Database, opts: &PlanOpts) -> Result<()> 
         false, // plan mode never skips permissions
         claude_config_dir.as_deref(),
         None, // plan mode never overrides permission_mode (#603)
+        read_backstop_override(crosslink_dir),
     );
 
     let output = Command::new("tmux")

@@ -27,6 +27,33 @@ fn resolve_timeout_command(platform: &Platform) -> Result<&'static str> {
     );
 }
 
+/// Generous backstop for the GNU timeout wrapper. The `--timeout` value is a
+/// GUIDE (expected task duration, stored in .kickoff-metadata.json and shown
+/// by `kickoff status`); the wrapper must never kill a healthy agent in normal
+/// operation. Backstop = max(timeout * 24, 24h) so even a short guide gets a
+/// 24-hour floor, far above any task ceiling (ASES #192).
+pub(super) fn timeout_backstop_secs(timeout_secs: u64) -> u64 {
+    std::cmp::max(timeout_secs.saturating_mul(24), 86_400)
+}
+
+/// Read an optional `kickoff.timeout_backstop_secs` override from
+/// hook-config.json.
+///
+/// When set, it replaces the computed backstop for the GNU timeout wrapper
+/// (which otherwise defaults to `max(timeout * 24, 24h)`). The `--timeout`
+/// guide value is never changed — it stays in `.kickoff-metadata.json` for
+/// `kickoff status` display. ASES #192.
+pub(super) fn read_backstop_override(crosslink_dir: &Path) -> Option<u64> {
+    let config_path = crosslink_dir.join("hook-config.json");
+    let content = std::fs::read_to_string(&config_path).ok()?;
+    let parsed: serde_json::Value = serde_json::from_str(&content).ok()?;
+    parsed
+        .get("kickoff")
+        .and_then(|k| k.get("timeout_backstop_secs"))
+        .and_then(serde_json::Value::as_u64)
+        .filter(|v| *v > 0)
+}
+
 /// Read the `sandbox.command` setting from hook-config.json, if configured.
 pub(super) fn read_sandbox_command(crosslink_dir: &Path) -> Option<String> {
     let config_path = crosslink_dir.join("hook-config.json");
@@ -67,6 +94,9 @@ pub(super) fn read_watchdog_config(crosslink_dir: &Path) -> WatchdogConfig {
         cfg.staleness_secs = v;
     }
     if let Some(v) = wd.get("max_nudges").and_then(serde_json::Value::as_u64) {
+        // Deprecated (ASES #192): the nudge path is gone; read tolerantly for
+        // config-file backward compatibility. The generated script never
+        // uses this value.
         cfg.max_nudges = u32::try_from(v).unwrap_or(u32::MAX);
     }
     if let Some(v) = wd
@@ -81,23 +111,54 @@ pub(super) fn read_watchdog_config(crosslink_dir: &Path) -> WatchdogConfig {
     {
         cfg.grace_period_secs = v;
     }
+    if let Some(v) = wd
+        .get("stall_marker")
+        .and_then(serde_json::Value::as_str)
+        .filter(|s| !s.is_empty())
+    {
+        cfg.stall_marker = Some(v.to_string());
+    }
     cfg
 }
 
 /// Build the watchdog shell script that monitors heartbeat staleness and
-/// nudges idle agents by sending "continue" via tmux send-keys.
+/// records stall evidence.
+///
+/// The script is purely an evidence recorder — it NEVER kills or nudges the
+/// agent (ASES #192). Kill/relaunch belongs to the future #146 watcher or to
+/// manual `kickoff stop`. Its jobs are:
+///
+/// 1. Disarm on TERMINAL status: exit 0 when the `.kickoff-status` file's
+///    CONTENT starts with `DONE`, `FAILED`, `CI_FAILED`, or `TIMEOUT` — not
+///    when the file merely exists. Checking existence alone is wrong because
+///    `launch` writes `LAUNCHING`/`RUNNING` into the file before the watchdog
+///    even starts, which would make the watchdog exit on its first check and
+///    leave the stall-evidence logic dead (fork bug #138).
+/// 2. Disarm when the tmux session disappears.
+/// 3. On stale heartbeat, write a stall-evidence marker at
+///    `{worktree}/.kickoff-stalled` (or the configured `stall_marker`)
+///    recording when the agent stalled. The marker is surfaced by
+///    `kickoff status` / `kickoff list` and never pollutes agent PRs (the
+///    marker is in `KICKOFF_EXCLUDE_PATTERNS`).
+///
+/// The script loops forever until a terminal condition — it never kills.
 pub(super) fn build_watchdog_script(
     session_name: &str,
     worktree_dir: &Path,
     cfg: &WatchdogConfig,
 ) -> String {
+    let stall_marker = cfg.stall_marker.as_deref().unwrap_or(".kickoff-stalled");
     // Use portable stat command — try GNU stat first, fall back to BSD
     format!(
-        r#"NUDGES=0
-sleep {grace}
+        r#"sleep {grace}
 while true; do
     sleep {interval}
-    if [ -f "{worktree}/.kickoff-status" ]; then exit 0; fi
+    if [ -f "{worktree}/.kickoff-status" ]; then
+        STATUS=$(cat "{worktree}/.kickoff-status" 2>/dev/null)
+        case "$STATUS" in
+            DONE*|FAILED*|CI_FAILED*|TIMEOUT*) exit 0 ;;
+        esac
+    fi
     if ! tmux has-session -t "{session}" 2>/dev/null; then exit 0; fi
     HB="{worktree}/.crosslink/.cache/last-heartbeat"
     if [ -f "$HB" ]; then
@@ -105,9 +166,7 @@ while true; do
         NOW=$(date +%s)
         AGE=$((NOW - LAST))
         if [ "$AGE" -gt {staleness} ]; then
-            if [ "$NUDGES" -ge {max_nudges} ]; then exit 1; fi
-            NUDGES=$((NUDGES + 1))
-            tmux send-keys -t "{session}" "continue working, the task is not yet complete" Enter
+            echo "stalled since $(date -u +%FT%TZ)" > "{worktree}/{stall_marker}"
         fi
     fi
 done
@@ -117,12 +176,12 @@ done
         worktree = worktree_dir.display(),
         session = session_name,
         staleness = cfg.staleness_secs,
-        max_nudges = cfg.max_nudges,
+        stall_marker = stall_marker,
     )
 }
 
 /// Spawn a background watchdog process that monitors the agent's heartbeat
-/// and sends "continue" to the tmux session if the agent goes idle.
+/// and records stall evidence (it never kills or nudges — ASES #192).
 pub(super) fn spawn_watchdog(
     session_name: &str,
     worktree_dir: &Path,
@@ -160,15 +219,24 @@ pub(super) fn spawn_watchdog(
 /// robust to additional wrappers prepended later (nice, chrt, bwrap, etc.).
 /// See GH#587.
 ///
+/// Timeout semantics (ASES #192): `timeout_secs` is the GUIDE — the expected
+/// task duration recorded in `.kickoff-metadata.json` and shown by `kickoff
+/// status`. The GNU timeout wrapper must NEVER kill a healthy agent in normal
+/// operation, so the wrapper duration is a generous BACKSTOP computed by
+/// [`timeout_backstop_secs`] (`max(timeout * 24, 24h)`), far above any task
+/// ceiling. `backstop_override`, when `Some`, raises the wrapper duration
+/// further (hook-config.json `kickoff.timeout_backstop_secs`).
+///
 /// When `sandbox_command` is set, the claude invocation is wrapped:
 /// ```text
-/// timeout 3600s my-sandbox --project-dir /path -- env -u CLAUDECODE CLAUDE_CONFIG_DIR='/p' claude ...
+/// timeout 86400s my-sandbox --project-dir /path -- env -u CLAUDECODE CLAUDE_CONFIG_DIR='/p' claude ...
 /// ```
 /// Without sandbox:
 /// ```text
-/// timeout 3600s env -u CLAUDECODE CLAUDE_CONFIG_DIR='/p' claude ...
+/// timeout 86400s env -u CLAUDECODE CLAUDE_CONFIG_DIR='/p' claude ...
 /// ```
-/// When `claude_config_dir` is `None`, the assignment is omitted.
+/// (`86400s` is the backstop for a 1h guide.) When `claude_config_dir` is
+/// `None`, the assignment is omitted.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn build_agent_command(
     agent_binary: &str,
@@ -183,6 +251,7 @@ pub(super) fn build_agent_command(
     skip_permissions: bool,
     claude_config_dir: Option<&str>,
     permission_mode: Option<&str>,
+    backstop_override: Option<u64>,
 ) -> String {
     use crate::utils::shell_escape_arg;
 
@@ -231,12 +300,17 @@ pub(super) fn build_agent_command(
             "env -u CLAUDECODE {env_assignment}{agent_binary}{skip_flag} < {escaped_kickoff}"
         )
     };
+    // The wrapper duration is the BACKSTOP, not the guide (ASES #192). A
+    // healthy agent must never be killed by `--timeout`; the backstop only
+    // exists as a destroyer guard against a wedged process, and even then it
+    // sits far above any task ceiling.
+    let backstop_secs = backstop_override.unwrap_or_else(|| timeout_backstop_secs(timeout_secs));
     sandbox_command.map_or_else(
-        || format!("{timeout_cmd} {timeout_secs}s {claude_cmd}"),
+        || format!("{timeout_cmd} {backstop_secs}s {claude_cmd}"),
         |cmd| {
             let escaped_worktree = shell_escape_arg(&worktree_dir.to_string_lossy());
             let expanded = cmd.replace("{{worktree}}", &escaped_worktree);
-            format!("{timeout_cmd} {timeout_secs}s {expanded} {claude_cmd}")
+            format!("{timeout_cmd} {backstop_secs}s {expanded} {claude_cmd}")
         },
     )
 }
@@ -475,6 +549,27 @@ pub(super) fn create_worktree(
     Ok((worktree_dir, branch_name))
 }
 
+/// Ensure the worktree has the heartbeat hook that writes
+/// `.crosslink/.cache/last-heartbeat` on agent activity.
+///
+/// `crosslink init` writes it, but init short-circuits when `.crosslink/` and
+/// `.claude/` already exist — the common case for a worktree freshly checked
+/// out from a branch that has both committed — and `.claude/hooks/` is
+/// gitignored, so a fresh worktree may lack `heartbeat.py`. Without the hook
+/// no heartbeat mtime flows and the watchdog has no liveness evidence to
+/// record (ASES #192 / #135 Phase 2). Best-effort: if the hook cannot be
+/// written, kickoff proceeds — liveness evidence is degraded, not fatal.
+pub(super) fn ensure_worktree_heartbeat(worktree_dir: &Path) {
+    let wt_hooks = worktree_dir.join(".claude").join("hooks");
+    if !wt_hooks.join("heartbeat.py").exists() {
+        let _ = std::fs::create_dir_all(&wt_hooks);
+        let _ = std::fs::write(
+            wt_hooks.join("heartbeat.py"),
+            crate::commands::init::HEARTBEAT_PY,
+        );
+    }
+}
+
 /// Initialize crosslink and agent identity in the worktree.
 pub(super) fn init_worktree_agent(
     worktree_dir: &Path,
@@ -499,6 +594,11 @@ pub(super) fn init_worktree_agent(
         let stderr = String::from_utf8_lossy(&output.stderr);
         tracing::warn!("crosslink init in worktree: {}", stderr.trim());
     }
+
+    // ASES #192 / #135 Phase 2: ensure the heartbeat hook exists in the
+    // worktree even when init short-circuited. Without it, no heartbeat mtime
+    // flows and liveness evidence is empty.
+    ensure_worktree_heartbeat(worktree_dir);
 
     // Use the compact name as the agent ID directly
     let agent_id = compact_name.to_string();
@@ -641,6 +741,7 @@ pub(super) fn launch_local(
         skip_permissions,
         claude_config_dir.as_deref(),
         permission_mode,
+        read_backstop_override(crosslink_dir),
     );
 
     // Write initial status sentinel BEFORE sending the command.
@@ -713,6 +814,9 @@ pub(super) fn launch_container(
     }
 
     let timeout_secs = timeout.as_secs();
+    // ASES #192: inside the container the timeout wrapper must never kill a
+    // healthy agent — use the generous backstop, not the guide value.
+    let backstop_secs = timeout_backstop_secs(timeout_secs);
     let container_name = format!("crosslink-agent-{agent_id}");
 
     // Get host UID/GID for remapping (skip on Windows — Docker Desktop handles user mapping)
@@ -820,12 +924,12 @@ pub(super) fn launch_container(
     args.push("-c".to_string());
     if agent_binary == "claude" {
         args.push(format!(
-            "cd /workspaces/repo && timeout {timeout_secs}s {agent_binary} --model {model} --agent {agent_type} --allowedTools '{allowed_tools}' -- \"$(cat KICKOFF.md)\""
+            "cd /workspaces/repo && timeout {backstop_secs}s {agent_binary} --model {model} --agent {agent_type} --allowedTools '{allowed_tools}' -- \"$(cat KICKOFF.md)\""
         ));
     } else {
         // Non-Claude agents: pipe the prompt via stdin
         args.push(format!(
-            "cd /workspaces/repo && timeout {timeout_secs}s {agent_binary} < KICKOFF.md"
+            "cd /workspaces/repo && timeout {backstop_secs}s {agent_binary} < KICKOFF.md"
         ));
     }
 

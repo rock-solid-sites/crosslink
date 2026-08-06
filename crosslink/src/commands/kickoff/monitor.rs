@@ -133,6 +133,34 @@ pub fn status(crosslink_dir: &Path, agent: &str) -> Result<()> {
         }
     }
 
+    // Worktree heartbeat age (ASES #192): liveness is the evidence stream —
+    // the mtime of `.crosslink/.cache/last-heartbeat`, written by the
+    // worktree's `.claude/hooks/heartbeat.py` on agent activity.
+    let hb_path = worktree_dir.join(".crosslink").join(".cache").join("last-heartbeat");
+    if let Ok(meta) = std::fs::metadata(&hb_path) {
+        if let Ok(modified) = meta.modified() {
+            if let Ok(elapsed) = modified.elapsed() {
+                println!("Heartbeat age: {}s ago (worktree)", elapsed.as_secs());
+            }
+        }
+    }
+
+    // Stall-evidence marker (ASES #192): written by the watchdog when the
+    // heartbeat went stale. Purely informational — kickoff never kills on
+    // timeout; kill/relaunch belongs to the #146 watcher / `kickoff stop`.
+    let stalled_path = worktree_dir.join(".kickoff-stalled");
+    if stalled_path.exists() {
+        let since = std::fs::read_to_string(&stalled_path)
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+        if since.is_empty() {
+            println!("Stalled:    yes (stall marker present)");
+        } else {
+            println!("Stalled:    yes ({since})");
+        }
+    }
+
     // Surface design-doc integrity. If `--doc` was used at launch we recorded
     // a SHA-256 in `.kickoff-doc.json`; comparing it to the on-disk file
     // catches the case where the agent rewrote the canonical input. GH#580.
@@ -225,6 +253,17 @@ pub(super) fn discover_agents(crosslink_dir: &Path) -> Result<Vec<AgentInfo>> {
                 "stopped".to_string()
             } else {
                 agent_status
+            };
+
+            // ASES #192: a stall-evidence marker means the watchdog observed a
+            // stale heartbeat while the agent was still running. Surface it as
+            // `stalled` — purely informational, the watchdog never kills.
+            let final_status = if final_status == "running"
+                && wt_path.join(".kickoff-stalled").exists()
+            {
+                "stalled".to_string()
+            } else {
+                final_status
             };
 
             agents.push(AgentInfo {

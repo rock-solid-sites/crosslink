@@ -524,6 +524,7 @@ fn test_missing_exclude_patterns_empty_file() {
             ".kickoff-slug",
             ".kickoff-metadata.json",
             ".kickoff-doc.json",
+            ".kickoff-stalled",
             "PLAN_KICKOFF.md",
             ".kickoff-plan.json",
             ".kickoff-criteria.json",
@@ -537,6 +538,7 @@ fn test_missing_exclude_patterns_one_present() {
     let patterns = missing_exclude_patterns("KICKOFF.md\nsome-other-file\n");
     assert!(patterns.contains(&".kickoff-status"));
     assert!(patterns.contains(&".kickoff-slug"));
+    assert!(patterns.contains(&".kickoff-stalled"));
     assert!(patterns.contains(&"PLAN_KICKOFF.md"));
     assert!(patterns.contains(&".kickoff-plan.json"));
     assert!(patterns.contains(&".kickoff-criteria.json"));
@@ -547,7 +549,7 @@ fn test_missing_exclude_patterns_one_present() {
 #[test]
 fn test_missing_exclude_patterns_all_present() {
     let patterns = missing_exclude_patterns(
-        "KICKOFF.md\n.kickoff-status\n.kickoff-slug\n.kickoff-metadata.json\n.kickoff-doc.json\nPLAN_KICKOFF.md\n.kickoff-plan.json\n.kickoff-criteria.json\n.kickoff-report.json\n",
+        "KICKOFF.md\n.kickoff-status\n.kickoff-slug\n.kickoff-metadata.json\n.kickoff-doc.json\n.kickoff-stalled\nPLAN_KICKOFF.md\n.kickoff-plan.json\n.kickoff-criteria.json\n.kickoff-report.json\n",
     );
     assert!(patterns.is_empty());
 }
@@ -555,7 +557,7 @@ fn test_missing_exclude_patterns_all_present() {
 #[test]
 fn test_missing_exclude_patterns_with_whitespace() {
     let patterns = missing_exclude_patterns(
-        "  KICKOFF.md  \n  .kickoff-status  \n  .kickoff-slug  \n  .kickoff-metadata.json  \n  .kickoff-doc.json  \n  PLAN_KICKOFF.md  \n  .kickoff-plan.json  \n  .kickoff-criteria.json  \n  .kickoff-report.json  \n",
+        "  KICKOFF.md  \n  .kickoff-status  \n  .kickoff-slug  \n  .kickoff-metadata.json  \n  .kickoff-doc.json  \n  .kickoff-stalled  \n  PLAN_KICKOFF.md  \n  .kickoff-plan.json  \n  .kickoff-criteria.json  \n  .kickoff-report.json  \n",
     );
     assert!(patterns.is_empty());
 }
@@ -1793,10 +1795,11 @@ fn test_build_agent_command_without_sandbox() {
         false,
         None,
         None,
+        None,
     );
     assert_eq!(
         cmd,
-        "timeout 3600s env -u CLAUDECODE claude --model 'opus' --agent 'builder' --allowedTools 'Read,Write' -- \"$(cat 'KICKOFF.md')\""
+        "timeout 86400s env -u CLAUDECODE claude --model 'opus' --agent 'builder' --allowedTools 'Read,Write' -- \"$(cat 'KICKOFF.md')\""
     );
 }
 
@@ -1815,8 +1818,9 @@ fn test_build_agent_command_with_sandbox() {
         false,
         None,
         None,
+        None,
     );
-    assert!(cmd.starts_with("timeout 3600s bwrap --bind '/tmp/my-worktree' /workspace --"));
+    assert!(cmd.starts_with("timeout 86400s bwrap --bind '/tmp/my-worktree' /workspace --"));
     assert!(cmd.contains("env -u CLAUDECODE claude"));
 }
 
@@ -1833,6 +1837,7 @@ fn test_build_agent_command_with_skip_permissions() {
         None,
         Path::new("/tmp/worktree"),
         true,
+        None,
         None,
         None,
     );
@@ -1860,6 +1865,7 @@ fn test_build_agent_command_with_permission_mode_auto() {
         false,
         None,
         Some("auto"),
+        None,
     );
     assert!(
         cmd.contains("--permission-mode 'auto'"),
@@ -1890,6 +1896,7 @@ fn test_build_agent_command_permission_mode_wins_over_skip_permissions() {
         true,
         None,
         Some("acceptEdits"),
+        None,
     );
     assert!(
         cmd.contains("--permission-mode 'acceptEdits'"),
@@ -1918,6 +1925,7 @@ fn test_build_agent_command_empty_permission_mode_treated_as_none() {
         true,
         None,
         Some(""),
+        None,
     );
     assert!(
         !cmd.contains("--permission-mode"),
@@ -1944,8 +1952,9 @@ fn test_build_agent_command_plan_kickoff() {
         false,
         None,
         None,
+        None,
     );
-    assert!(cmd.starts_with("gtimeout 1800s"));
+    assert!(cmd.starts_with("gtimeout 86400s"));
     assert!(cmd.contains("$(cat 'PLAN_KICKOFF.md')"));
 }
 
@@ -1971,6 +1980,7 @@ fn test_build_agent_command_with_non_builder_agent_type() {
             None,
             Path::new("/tmp/worktree"),
             false,
+            None,
             None,
             None,
         );
@@ -2005,10 +2015,11 @@ fn test_build_agent_command_propagates_claude_config_dir() {
         false,
         Some("/Users/me/.claude-work"),
         None,
+        None,
     );
     assert_eq!(
         cmd,
-        "timeout 3600s env -u CLAUDECODE CLAUDE_CONFIG_DIR='/Users/me/.claude-work' claude --model 'opus' --agent 'builder' --allowedTools 'Read,Write' -- \"$(cat 'KICKOFF.md')\""
+        "timeout 86400s env -u CLAUDECODE CLAUDE_CONFIG_DIR='/Users/me/.claude-work' claude --model 'opus' --agent 'builder' --allowedTools 'Read,Write' -- \"$(cat 'KICKOFF.md')\""
     );
 }
 
@@ -2029,9 +2040,10 @@ fn test_build_agent_command_omits_empty_claude_config_dir() {
         false,
         Some(""),
         None,
+        None,
     );
     assert!(!cmd.contains("CLAUDE_CONFIG_DIR="));
-    assert!(cmd.starts_with("timeout 3600s env -u CLAUDECODE claude"));
+    assert!(cmd.starts_with("timeout 86400s env -u CLAUDECODE claude"));
 }
 
 #[test]
@@ -2051,6 +2063,7 @@ fn test_build_agent_command_escapes_claude_config_dir_with_quotes() {
         Path::new("/tmp/worktree"),
         false,
         Some("/weird/it's-a-path"),
+        None,
         None,
     );
     assert!(cmd.contains("CLAUDE_CONFIG_DIR='/weird/it'\\''s-a-path'"));
@@ -2074,6 +2087,7 @@ fn test_build_agent_command_with_sandbox_includes_claude_config_dir() {
         false,
         Some("/Users/me/.claude-work"),
         None,
+        None,
     );
     assert!(cmd.contains(
         "bwrap --bind '/tmp/my-worktree' /workspace -- env -u CLAUDECODE CLAUDE_CONFIG_DIR='/Users/me/.claude-work' claude"
@@ -2085,7 +2099,7 @@ fn test_build_agent_command_with_sandbox_includes_claude_config_dir() {
 // through a shell. The string-shape unit tests above check what we emit; these
 // tests check that what we emit is what a shell will execute correctly. The
 // 0.8.0 regression would have been caught here — the shell-prefix form
-// `timeout 3600s CCD=val env ... claude ...` parsed as a literal positional
+// `timeout 86400s CCD=val env ... claude ...` parsed as a literal positional
 // arg to timeout and never reached claude.
 // ============================================================================
 
@@ -2169,6 +2183,7 @@ fn test_build_agent_command_env_var_actually_reaches_claude() {
         false,
         Some("/expected/value"),
         None,
+        None,
     );
 
     let output = run_built_command_in_bash(&cmd, tmp.path(), tmp.path());
@@ -2223,6 +2238,7 @@ fn test_build_agent_command_env_var_reaches_claude_through_sandbox() {
         false,
         Some("/sandbox-passthrough/value"),
         None,
+        None,
     );
 
     let output = run_built_command_in_bash(&cmd, tmp.path(), tmp.path());
@@ -2266,6 +2282,7 @@ fn test_build_agent_command_omitted_env_var_does_not_break_launch() {
         None,
         tmp.path(),
         false,
+        None,
         None,
         None,
     );
@@ -2675,9 +2692,10 @@ fn test_watchdog_config_defaults() {
     let cfg = WatchdogConfig::default();
     assert!(cfg.enabled);
     assert_eq!(cfg.staleness_secs, 300);
-    assert_eq!(cfg.max_nudges, 5);
+    assert_eq!(cfg.max_nudges, 5); // deprecated but retained for compat
     assert_eq!(cfg.check_interval_secs, 120);
     assert_eq!(cfg.grace_period_secs, 300);
+    assert!(cfg.stall_marker.is_none());
 }
 
 #[test]
@@ -2701,14 +2719,27 @@ fn test_read_watchdog_config_custom_values() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(
         dir.path().join("hook-config.json"),
-        r#"{"watchdog": {"enabled": false, "staleness_secs": 600, "max_nudges": 10}}"#,
+        r#"{"watchdog": {"enabled": false, "staleness_secs": 600, "max_nudges": 10, "stall_marker": ".kickoff-stalled-custom"}}"#,
     )
     .unwrap();
     let cfg = read_watchdog_config(dir.path());
     assert!(!cfg.enabled);
     assert_eq!(cfg.staleness_secs, 600);
-    assert_eq!(cfg.max_nudges, 10);
+    assert_eq!(cfg.max_nudges, 10); // deprecated but still read tolerantly
     assert_eq!(cfg.check_interval_secs, 120); // still default
+    assert_eq!(cfg.stall_marker.as_deref(), Some(".kickoff-stalled-custom"));
+}
+
+#[test]
+fn test_read_watchdog_config_empty_stall_marker_ignored() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("hook-config.json"),
+        r#"{"watchdog": {"stall_marker": ""}}"#,
+    )
+    .unwrap();
+    let cfg = read_watchdog_config(dir.path());
+    assert!(cfg.stall_marker.is_none(), "empty stall_marker must fall back to default");
 }
 
 #[test]
@@ -2716,9 +2747,10 @@ fn test_build_watchdog_script_contains_key_elements() {
     let cfg = WatchdogConfig {
         enabled: true,
         staleness_secs: 300,
-        max_nudges: 3,
+        max_nudges: 3, // deprecated — retained for struct-literal compat
         check_interval_secs: 60,
         grace_period_secs: 120,
+        stall_marker: None,
     };
     let script = build_watchdog_script("feat-my-agent", Path::new("/tmp/wt"), &cfg);
     assert!(script.contains("sleep 120")); // grace period
@@ -2726,10 +2758,328 @@ fn test_build_watchdog_script_contains_key_elements() {
     assert!(script.contains(".kickoff-status"));
     assert!(script.contains("feat-my-agent"));
     assert!(script.contains("last-heartbeat"));
-    assert!(script.contains("continue working"));
-    assert!(script.contains("NUDGES"));
     assert!(script.contains("-gt 300")); // staleness threshold
-    assert!(script.contains("-ge 3")); // max nudges
+    assert!(script.contains("/tmp/wt/.kickoff-stalled")); // default stall marker
+    // Fork bug #138: the script must disarm on TERMINAL status CONTENT, not
+    // on mere file existence (the file exists from LAUNCHING onward, so an
+    // existence check made the watchdog exit on its very first iteration).
+    assert!(
+        script.contains("DONE*|FAILED*|CI_FAILED*|TIMEOUT*"),
+        "watchdog must exit on terminal .kickoff-status content, not file existence"
+    );
+    assert!(
+        !script.contains("[ -f {worktree}/.kickoff-status ]"),
+        "watchdog must not exit merely because .kickoff-status exists"
+    );
+    // ASES #192: the watchdog never kills or nudges — it only records
+    // stall evidence.
+    assert!(
+        !script.contains("send-keys"),
+        "watchdog must never emit tmux send-keys (ASES #192)"
+    );
+    assert!(
+        !script.contains("continue working"),
+        "watchdog must never nudge the agent (ASES #192)"
+    );
+    assert!(
+        !script.contains("NUDGES"),
+        "nudge counter must be gone (ASES #192)"
+    );
+    assert!(
+        !script.contains("-ge 3"),
+        "max_nudges must be gone from the script (ASES #192)"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// ASES #192: timeout backstop + evidence-stream watchdog regression tests
+//
+// The old wrapper hard-killed the agent via `timeout {N}s` and the old
+// watchdog nudged stale agents via tmux send-keys. ASES #192 makes the
+// timeout a generous backstop (guide-only semantics) and turns the watchdog
+// into a pure evidence recorder that writes `.kickoff-stalled` on stale
+// heartbeats and NEVER kills or nudges. Fork bug #138's terminal-sentinel
+// exit condition (ported from 799ce67d) is preserved: the script disarms on
+// terminal status CONTENT, not on mere file existence.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_timeout_backstop_secs() {
+    // ASES #192: the wrapper backstop must sit far above the guide value so
+    // it never fires in normal operation.
+    assert_eq!(timeout_backstop_secs(3600), 86_400); // 1h guide -> 24h floor
+    assert_eq!(timeout_backstop_secs(600), 86_400); // 10m guide -> still 24h floor
+    assert_eq!(timeout_backstop_secs(5000), 120_000); // 5000s guide -> 24x
+    assert_eq!(timeout_backstop_secs(0), 86_400); // degenerate guide -> 24h floor
+    assert_eq!(timeout_backstop_secs(u64::MAX), u64::MAX); // saturating multiply
+}
+
+#[test]
+fn test_read_backstop_override_not_configured() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("hook-config.json"), "{}").unwrap();
+    assert!(read_backstop_override(dir.path()).is_none());
+}
+
+#[test]
+fn test_read_backstop_override_configured() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("hook-config.json"),
+        r#"{"kickoff": {"timeout_backstop_secs": 172800}}"#,
+    )
+    .unwrap();
+    assert_eq!(read_backstop_override(dir.path()), Some(172_800));
+}
+
+#[test]
+fn test_build_agent_command_honors_backstop_override() {
+    // hook-config `kickoff.timeout_backstop_secs` must win over the computed
+    // backstop when threaded through build_agent_command (ASES #192).
+    let cmd = build_agent_command(
+        "claude",
+        "builder",
+        "timeout",
+        3600,
+        "opus",
+        "Read,Write",
+        "KICKOFF.md",
+        None,
+        Path::new("/tmp/worktree"),
+        false,
+        None,
+        None,
+        Some(172_800),
+    );
+    assert!(
+        cmd.starts_with("timeout 172800s env -u CLAUDECODE claude"),
+        "backstop override must be honored, got: {cmd}"
+    );
+}
+
+#[test]
+fn test_ensure_worktree_heartbeat_writes_hook_when_missing() {
+    // ASES #192 / #135 Phase 2: a fresh worktree may lack
+    // .claude/hooks/heartbeat.py (init short-circuits when .claude/ exists
+    // and .claude/hooks is gitignored). ensure_worktree_heartbeat must create
+    // it so heartbeat mtime flows and liveness evidence is non-empty.
+    let wt = tempfile::tempdir().unwrap();
+    // Simulate the common fresh-worktree case: .claude/ exists, hooks does not.
+    std::fs::create_dir_all(wt.path().join(".claude")).unwrap();
+    ensure_worktree_heartbeat(wt.path());
+    let hook = wt.path().join(".claude").join("hooks").join("heartbeat.py");
+    assert!(
+        hook.is_file(),
+        "heartbeat.py should be written into .claude/hooks"
+    );
+    let content = std::fs::read_to_string(&hook).unwrap_or_default();
+    assert!(
+        content.contains("heartbeat"),
+        "heartbeat.py content should come from the bundled resource (ASES #192)"
+    );
+}
+
+#[test]
+fn test_ensure_worktree_heartbeat_preserves_existing_hook() {
+    // If the hook already exists (e.g. crosslink init ran fully), it must not
+    // be clobbered by the ensure pass.
+    let wt = tempfile::tempdir().unwrap();
+    let hooks = wt.path().join(".claude").join("hooks");
+    std::fs::create_dir_all(&hooks).unwrap();
+    std::fs::write(hooks.join("heartbeat.py"), "CUSTOM HEARTBEAT\n").unwrap();
+    ensure_worktree_heartbeat(wt.path());
+    let content = std::fs::read_to_string(hooks.join("heartbeat.py")).unwrap_or_default();
+    assert_eq!(content, "CUSTOM HEARTBEAT\n");
+}
+
+/// Write a fake `tmux` shim that logs every invocation to `$FAKE_TMUX_LOG`.
+///
+/// When `$FAKE_TMUX_ALIVE_CALLS` is `> 0`, the shim reports an alive session
+/// for that many invocations and a dead one afterwards (so a watchdog test
+/// can let the loop reach the heartbeat branch and then terminate cleanly);
+/// when unset/`0` it always reports an alive session.
+#[cfg(unix)]
+fn write_fake_tmux(dir: &Path, log_path: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+    let shim = dir.join("tmux");
+    std::fs::write(
+        &shim,
+        r#"#!/bin/sh
+printf '%s\n' "$*" >> "$FAKE_TMUX_LOG"
+MAX="$FAKE_TMUX_ALIVE_CALLS"
+if [ -z "$MAX" ]; then MAX=0; fi
+if [ "$MAX" -gt 0 ]; then
+    N=$(cat "$FAKE_TMUX_COUNT" 2>/dev/null || echo 0)
+    N=$((N + 1))
+    echo "$N" > "$FAKE_TMUX_COUNT"
+    if [ "$N" -gt "$MAX" ]; then exit 1; fi
+fi
+exit 0
+"#,
+    )
+    .unwrap();
+    std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let _ = log_path;
+}
+
+/// Create a stale heartbeat file (mtime 2000-01-01) so staleness always trips.
+fn write_stale_heartbeat(worktree: &Path) {
+    let hb_dir = worktree.join(".crosslink").join(".cache");
+    std::fs::create_dir_all(&hb_dir).unwrap();
+    std::fs::write(hb_dir.join("last-heartbeat"), "2000-01-01T00:00:00Z").unwrap();
+    let status = std::process::Command::new("touch")
+        .arg("-t")
+        .arg("200001010000")
+        .arg(hb_dir.join("last-heartbeat"))
+        .status()
+        .unwrap();
+    assert!(status.success(), "touch -t failed on test host");
+}
+
+/// Run a watchdog script built with `cfg` against `worktree`, with the fake
+/// tmux shim (logging to `tmux_log`) on PATH. `alive_calls` controls how many
+/// times the fake tmux reports an alive session before going dead. Returns
+/// the process output.
+#[cfg(unix)]
+fn run_watchdog_script(
+    worktree: &Path,
+    cfg: &WatchdogConfig,
+    shim_dir: &Path,
+    tmux_log: &Path,
+    alive_calls: u32,
+) -> std::process::Output {
+    let script = build_watchdog_script("feat-test-agent", worktree, cfg);
+    let path = format!(
+        "{}:{}",
+        shim_dir.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    std::process::Command::new("bash")
+        .arg("-c")
+        .arg(script)
+        .env("PATH", &path)
+        .env("FAKE_TMUX_LOG", tmux_log)
+        .env("FAKE_TMUX_ALIVE_CALLS", alive_calls.to_string())
+        .env("FAKE_TMUX_COUNT", shim_dir.join("tmux.count"))
+        .output()
+        .expect("failed to spawn bash for watchdog script")
+}
+
+#[test]
+#[cfg(unix)]
+fn test_watchdog_exits_on_terminal_status_without_nudging() {
+    // Regression for fork bug #138: with terminal status content the watchdog
+    // must exit 0 at the status check — and must NOT have written any
+    // stall-evidence marker (it never reaches the heartbeat branch).
+    for status in ["DONE", "FAILED", "CI_FAILED", "TIMEOUT"] {
+        let wt = tempfile::tempdir().unwrap();
+        let shim = tempfile::tempdir().unwrap();
+        let log_path = shim.path().join("tmux.log");
+        write_fake_tmux(shim.path(), &log_path);
+        std::fs::write(wt.path().join(".kickoff-status"), format!("{status}\n")).unwrap();
+        let cfg = WatchdogConfig {
+            enabled: true,
+            staleness_secs: 1,
+            max_nudges: 1, // deprecated — retained for struct-literal compat
+            check_interval_secs: 1,
+            grace_period_secs: 0,
+            stall_marker: None,
+        };
+        let out = run_watchdog_script(wt.path(), &cfg, shim.path(), &log_path, 0);
+        assert!(
+            out.status.success(),
+            "watchdog should exit 0 for terminal status {status:?}, got {:?} (stderr: {})",
+            out.status.code(),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let log = std::fs::read_to_string(&log_path).unwrap_or_default();
+        assert!(
+            !log.contains("send-keys"),
+            "watchdog must never send tmux keys; tmux log: {log}"
+        );
+        assert!(
+            !wt.path().join(".kickoff-stalled").exists(),
+            "terminal status must not produce a stall marker (status: {status:?})"
+        );
+    }
+}
+
+#[test]
+#[cfg(unix)]
+fn test_watchdog_records_stall_evidence_on_stale_heartbeat_never_nudges() {
+    // ASES #192 regression: with RUNNING status + a stale heartbeat the
+    // script must (a) NOT exit merely because `.kickoff-status` exists (fork
+    // bug #138 — the file exists from LAUNCHING onward), (b) NOT nudge the
+    // agent via tmux send-keys, and (c) record stall evidence at
+    // `.kickoff-stalled`. The fake tmux reports the session alive for exactly
+    // one check so the script reaches the heartbeat branch, then goes dead so
+    // the loop terminates cleanly with exit 0 (never exit 1 on max_nudges).
+    let wt = tempfile::tempdir().unwrap();
+    let shim = tempfile::tempdir().unwrap();
+    let log_path = shim.path().join("tmux.log");
+    write_fake_tmux(shim.path(), &log_path);
+    std::fs::write(wt.path().join(".kickoff-status"), "RUNNING\n").unwrap();
+    write_stale_heartbeat(wt.path());
+    let cfg = WatchdogConfig {
+        enabled: true,
+        staleness_secs: 1,
+        max_nudges: 1, // deprecated — retained for struct-literal compat
+        check_interval_secs: 1,
+        grace_period_secs: 0,
+        stall_marker: None,
+    };
+    let out = run_watchdog_script(wt.path(), &cfg, shim.path(), &log_path, 1);
+    assert!(
+        out.status.success(),
+        "watchdog should exit 0 (session gone) — never exit 1 on max_nudges (stderr: {})",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let log = std::fs::read_to_string(&log_path).unwrap_or_default();
+    assert!(
+        !log.contains("send-keys"),
+        "watchdog must never nudge the agent via tmux send-keys (ASES #192); tmux log: {log}"
+    );
+    let marker = wt.path().join(".kickoff-stalled");
+    assert!(
+        marker.exists(),
+        "watchdog must write stall evidence on stale heartbeat"
+    );
+    let content = std::fs::read_to_string(&marker).unwrap_or_default();
+    assert!(
+        content.starts_with("stalled since"),
+        "stall marker should record when the agent stalled, got: {content:?}"
+    );
+}
+
+#[test]
+#[cfg(unix)]
+fn test_watchdog_uses_custom_stall_marker() {
+    // A configured `watchdog.stall_marker` must be written instead of the
+    // default `.kickoff-stalled`.
+    let wt = tempfile::tempdir().unwrap();
+    let shim = tempfile::tempdir().unwrap();
+    let log_path = shim.path().join("tmux.log");
+    write_fake_tmux(shim.path(), &log_path);
+    std::fs::write(wt.path().join(".kickoff-status"), "RUNNING\n").unwrap();
+    write_stale_heartbeat(wt.path());
+    let cfg = WatchdogConfig {
+        enabled: true,
+        staleness_secs: 1,
+        max_nudges: 1,
+        check_interval_secs: 1,
+        grace_period_secs: 0,
+        stall_marker: Some(".kickoff-stalled-custom".to_string()),
+    };
+    let out = run_watchdog_script(wt.path(), &cfg, shim.path(), &log_path, 1);
+    assert!(out.status.success());
+    assert!(
+        wt.path().join(".kickoff-stalled-custom").is_file(),
+        "custom stall marker should be written"
+    );
+    assert!(
+        !wt.path().join(".kickoff-stalled").exists(),
+        "default stall marker must not be written when a custom one is set"
+    );
 }
 
 // ---------------------------------------------------------------------------

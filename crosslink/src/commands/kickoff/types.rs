@@ -262,18 +262,32 @@ pub(crate) enum LinuxDistro {
     Other,
 }
 
-/// Watchdog configuration for detecting and nudging idle agents.
+/// Watchdog configuration for detecting idle agents and recording stall
+/// evidence.
+///
+/// ASES #192: the watchdog is a pure evidence recorder. It NEVER kills or
+/// nudges the agent — kill/relaunch belongs to the future #146 watcher or
+/// manual `kickoff stop`.
 pub(super) struct WatchdogConfig {
     /// Whether the watchdog is enabled (default: true)
     pub enabled: bool,
-    /// Seconds of heartbeat staleness before nudging (default: 300)
+    /// Seconds of heartbeat staleness before recording stall evidence
+    /// (default: 300)
     pub staleness_secs: u64,
-    /// Maximum number of nudges before giving up (default: 5)
+    /// Maximum number of nudges before giving up (default: 5).
+    ///
+    /// DEPRECATED — the nudge path was removed in ASES #192: the generated
+    /// watchdog script never nudges or kills, it only records stall evidence.
+    /// The field is retained for config-file backward compatibility (read
+    /// tolerantly by `read_watchdog_config`, never used by the script).
     pub max_nudges: u32,
     /// Seconds between watchdog checks (default: 120)
     pub check_interval_secs: u64,
     /// Grace period before watchdog starts checking (default: 300)
     pub grace_period_secs: u64,
+    /// Custom stall-evidence marker path, worktree-relative. `None` uses the
+    /// default `.kickoff-stalled` (default: None)
+    pub stall_marker: Option<String>,
 }
 
 impl Default for WatchdogConfig {
@@ -284,6 +298,7 @@ impl Default for WatchdogConfig {
             max_nudges: 5,
             check_interval_secs: 120,
             grace_period_secs: 300,
+            stall_marker: None,
         }
     }
 }

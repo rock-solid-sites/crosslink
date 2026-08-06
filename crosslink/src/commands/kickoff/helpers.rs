@@ -403,6 +403,7 @@ pub(crate) const KICKOFF_EXCLUDE_PATTERNS: &[&str] = &[
     ".kickoff-slug",
     ".kickoff-metadata.json",
     ".kickoff-doc.json",
+    ".kickoff-stalled",
     "PLAN_KICKOFF.md",
     ".kickoff-plan.json",
     ".kickoff-criteria.json",

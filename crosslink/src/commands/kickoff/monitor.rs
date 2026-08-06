@@ -5,6 +5,7 @@ use std::path::Path;
 use std::process::Command;
 
 use super::helpers::*;
+use super::launch::stall_marker_path;
 use super::types::*;
 
 /// `crosslink kickoff status <agent>`
@@ -148,7 +149,9 @@ pub fn status(crosslink_dir: &Path, agent: &str) -> Result<()> {
     // Stall-evidence marker (ASES #192): written by the watchdog when the
     // heartbeat went stale. Purely informational — kickoff never kills on
     // timeout; kill/relaunch belongs to the #146 watcher / `kickoff stop`.
-    let stalled_path = worktree_dir.join(".kickoff-stalled");
+    // The path honors `watchdog.stall_marker` so a custom marker set in
+    // hook-config.json is read here, not just written by the watchdog.
+    let stalled_path = stall_marker_path(&worktree_dir, crosslink_dir);
     if stalled_path.exists() {
         let since = std::fs::read_to_string(&stalled_path)
             .unwrap_or_default()
@@ -257,9 +260,10 @@ pub(super) fn discover_agents(crosslink_dir: &Path) -> Result<Vec<AgentInfo>> {
 
             // ASES #192: a stall-evidence marker means the watchdog observed a
             // stale heartbeat while the agent was still running. Surface it as
-            // `stalled` — purely informational, the watchdog never kills.
+            // `stalled` — purely informational, the watchdog never kills. The
+            // marker path honors `watchdog.stall_marker` from hook-config.json.
             let final_status = if final_status == "running"
-                && wt_path.join(".kickoff-stalled").exists()
+                && stall_marker_path(&wt_path, crosslink_dir).exists()
             {
                 "stalled".to_string()
             } else {

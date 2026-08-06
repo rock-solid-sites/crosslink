@@ -1669,7 +1669,12 @@ enum KickoffCommands {
         /// Container image (for --container docker/podman)
         #[arg(long, default_value = "ghcr.io/dollspace-gay/crosslink-agent:latest")]
         image: String,
-        /// Max runtime before killing agent (e.g. "1h", "30m")
+        /// Expected task duration (guide, e.g. "1h", "30m"). The agent is
+        /// NOT killed at this time — it is recorded in .kickoff-metadata.json
+        /// and shown by `kickoff status`; a generous backstop
+        /// (max(timeout*24, 24h), override via hook-config
+/// `kickoff.timeout_backstop_secs`) only guards against a wedged
+/// process (ASES #192).
         #[arg(long, default_value = "1h")]
         timeout: String,
         /// Print the agent prompt without launching
@@ -1746,7 +1751,11 @@ enum KickoffCommands {
         /// LLM model to use
         #[arg(long, default_value = "opus")]
         model: String,
-        /// Max runtime (e.g. "30m", "1h")
+        /// Expected task duration (guide, e.g. "30m", "1h"). The agent is
+        /// NOT killed at this time — a generous backstop
+        /// (max(timeout*24, 24h), override via hook-config
+/// `kickoff.timeout_backstop_secs`) only guards against a wedged
+/// process (ASES #192).
         #[arg(long, default_value = "30m")]
         timeout: String,
         /// Print the analysis prompt without launching
@@ -1819,7 +1828,11 @@ enum KickoffCommands {
         /// LLM model to use
         #[arg(long, default_value = "opus")]
         model: String,
-        /// Max runtime (e.g. "1h", "30m")
+        /// Expected task duration (guide, e.g. "1h", "30m"). The agent is
+        /// NOT killed at this time — a generous backstop
+        /// (max(timeout*24, 24h), override via hook-config
+/// `kickoff.timeout_backstop_secs`) only guards against a wedged
+/// process (ASES #192).
         #[arg(long, default_value = "1h")]
         timeout: String,
         /// Container runtime: none, docker, podman

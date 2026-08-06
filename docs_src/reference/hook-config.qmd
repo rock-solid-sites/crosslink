@@ -134,6 +134,18 @@ Auto-detection already handles `Bash(cargo *)`, `Bash(npm *)`, `Bash(uv *)`, `Ba
 
 Optional sandbox-wrapper command applied to local kickoff launches. String. Default: unset (no sandboxing). When set, the kickoff agent's `claude` invocation is prefixed with this command; the value must be a binary on `$PATH` accepting the command to run as its trailing argument. See [Local sandbox alternative](../guides/container-agents.qmd#local-sandbox-alternative) in the container-agents guide for usage notes.
 
+### `kickoff.timeout_backstop_secs`
+
+Explicit override for the destroyer-guard wrapper duration around local kickoff agents. Integer seconds. Default: `max(timeout * 24, 86400)` (24-hour floor) computed from the `--timeout` guide value.
+
+The `--timeout` flag is a **guide**, not a kill timer (ASES #192): the expected task duration recorded in `.kickoff-metadata.json` and shown by `kickoff status`. The GNU `timeout` wrapper around the agent is a generous backstop far above any task ceiling and never kills a healthy agent in normal operation. Set this key to raise (or, with care, lower) that wrapper duration without changing the displayed guide value:
+
+```bash
+crosslink config set kickoff.timeout_backstop_secs 259200   # 3 days
+```
+
+Set to `0` or omit to keep the computed default (`max(timeout * 24, 24h)`).
+
 &nbsp;
 
 ---
@@ -185,7 +197,12 @@ Test commands the agent runs as part of its self-validation pass. Auto-populated
 
 ## Watchdog configuration
 
-The `watchdog` block controls the per-kickoff sidecar that detects stalled local agents and sends a "continue" nudge to their tmux session. It applies only to local (non-container) kickoffs -- container agents have their own timeout enforcement via `--stop-timeout`. The block is read by `read_watchdog_config` in the kickoff launcher; omitting any sub-key keeps its default.
+The `watchdog` block configures the per-kickoff sidecar that records stall evidence for local agents. The watchdog is a pure **evidence recorder** (ASES #192): it NEVER kills and NEVER nudges the agent — kill/relaunch belongs to `kickoff stop` or an external watcher. Its jobs are:
+
+1. Exit cleanly when the agent finishes: the `.kickoff-status` file's *content* reaches `DONE`/`FAILED`/`CI_FAILED`/`TIMEOUT` (fork bug #138 — checking file existence alone is wrong because `LAUNCHING`/`RUNNING` is written before the watchdog even starts), or when the tmux session disappears.
+2. On a stale heartbeat, write a stall-evidence marker in the worktree (`.kickoff-stalled`, or the configured `watchdog.stall_marker`) recording when the agent stalled. The marker is surfaced by `kickoff status` / `kickoff list` as a `stalled` status; it is purely informational.
+
+It applies only to local (non-container) kickoffs -- container agents run under the container runtime's own lifecycle. The block is read by `read_watchdog_config` in the kickoff launcher; omitting any sub-key keeps its default.
 
 ```json
 {
@@ -194,22 +211,23 @@ The `watchdog` block controls the per-kickoff sidecar that detects stalled local
     "staleness_secs": 300,
     "max_nudges": 5,
     "check_interval_secs": 120,
-    "grace_period_secs": 300
+    "grace_period_secs": 300,
+    "stall_marker": ".kickoff-stalled"
   }
 }
 ```
 
 ### `watchdog.enabled`
 
-Master switch for the per-kickoff watchdog sidecar. Bool. Default: `true`. When `false`, no watchdog process is spawned alongside local kickoffs and stalled agents are left alone until the overall `--timeout` fires.
+Master switch for the per-kickoff watchdog sidecar. Bool. Default: `true`. When `false`, no watchdog process is spawned alongside local kickoffs and no stall-evidence marker is recorded for stalled agents.
 
 ### `watchdog.staleness_secs`
 
-Seconds without a heartbeat before the watchdog considers an agent stalled and sends a nudge. Integer. Default: `300` (5 minutes). Heartbeats are written by the `PostToolUse` hook on every tool call, so a healthy agent refreshes this every few seconds.
+Seconds without a heartbeat before the watchdog considers an agent stalled and records stall evidence. Integer. Default: `300` (5 minutes). Heartbeats are written by the `PostToolUse` hook on every tool call, so a healthy agent refreshes this every few seconds.
 
 ### `watchdog.max_nudges`
 
-Maximum number of "continue" nudges the watchdog will send before giving up and exiting. Integer. Default: `5`. Once exhausted, the watchdog leaves the tmux session running but stops trying to revive it -- the surrounding `--timeout` will eventually clean up.
+DEPRECATED (ASES #192) -- the nudge path was removed: the watchdog never sends "continue" nudges and never gives up on an agent. The key is read tolerantly for config-file backward compatibility and has no effect on the generated watchdog script.
 
 ### `watchdog.check_interval_secs`
 
@@ -218,6 +236,10 @@ Seconds between watchdog poll cycles. Integer. Default: `120` (2 minutes). Lower
 ### `watchdog.grace_period_secs`
 
 Seconds the watchdog waits after launch before its first check, giving the agent time to start up and write its first heartbeat. Integer. Default: `300` (5 minutes). If your kickoffs are reliably idle for longer than this at the start (e.g. slow toolchain installs in the worktree), raise it.
+
+### `watchdog.stall_marker`
+
+Worktree-relative file name (or path) the watchdog writes when it observes a stale heartbeat, recording when the agent stalled. String. Default: `.kickoff-stalled`. The marker is surfaced by `kickoff status` / `kickoff list` as a `stalled` status and is excluded from git (see `KICKOFF_EXCLUDE_PATTERNS`) so it never pollutes agent PRs. `kickoff status` and `kickoff list` resolve the same config, so a custom marker is read, not just written. The default `.kickoff-stalled` is the recommended value; change it only if it collides with a real file in your worktrees.
 
 &nbsp;
 

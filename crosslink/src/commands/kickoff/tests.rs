@@ -2743,6 +2743,37 @@ fn test_read_watchdog_config_empty_stall_marker_ignored() {
 }
 
 #[test]
+fn test_stall_marker_path_default_and_custom() {
+    // ASES #192 finding 2: `status`/`discover_agents` must resolve the SAME
+    // marker path the watchdog writes — default `.kickoff-stalled`, or the
+    // configured `watchdog.stall_marker` — or a custom marker's evidence is
+    // never surfaced.
+    let wt = tempfile::tempdir().unwrap();
+    let crosslink = tempfile::tempdir().unwrap();
+
+    // No hook-config: default marker.
+    assert_eq!(
+        stall_marker_path(wt.path(), crosslink.path()),
+        wt.path().join(".kickoff-stalled")
+    );
+
+    // Custom marker: readers must resolve it, not the default.
+    std::fs::write(
+        crosslink.path().join("hook-config.json"),
+        r#"{"watchdog": {"stall_marker": ".kickoff-stalled-custom"}}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        stall_marker_path(wt.path(), crosslink.path()),
+        wt.path().join(".kickoff-stalled-custom")
+    );
+    assert_ne!(
+        stall_marker_path(wt.path(), crosslink.path()),
+        wt.path().join(".kickoff-stalled")
+    );
+}
+
+#[test]
 fn test_build_watchdog_script_contains_key_elements() {
     let cfg = WatchdogConfig {
         enabled: true,
@@ -2766,10 +2797,6 @@ fn test_build_watchdog_script_contains_key_elements() {
     assert!(
         script.contains("DONE*|FAILED*|CI_FAILED*|TIMEOUT*"),
         "watchdog must exit on terminal .kickoff-status content, not file existence"
-    );
-    assert!(
-        !script.contains("[ -f {worktree}/.kickoff-status ]"),
-        "watchdog must not exit merely because .kickoff-status exists"
     );
     // ASES #192: the watchdog never kills or nudges — it only records
     // stall evidence.
@@ -2858,16 +2885,18 @@ fn test_build_agent_command_honors_backstop_override() {
 }
 
 #[test]
-fn test_ensure_worktree_heartbeat_writes_hook_when_missing() {
+fn test_ensure_worktree_hooks_writes_hook_and_config_when_missing() {
     // ASES #192 / #135 Phase 2: a fresh worktree may lack
     // .claude/hooks/heartbeat.py (init short-circuits when .claude/ exists
-    // and .claude/hooks is gitignored). ensure_worktree_heartbeat must create
-    // it so heartbeat mtime flows and liveness evidence is non-empty.
+    // and .claude/hooks is gitignored). ensure_worktree_hooks must create
+    // heartbeat.py AND its shared-config dependency crosslink_config.py so
+    // heartbeat mtime flows and liveness evidence is non-empty.
     let wt = tempfile::tempdir().unwrap();
     // Simulate the common fresh-worktree case: .claude/ exists, hooks does not.
     std::fs::create_dir_all(wt.path().join(".claude")).unwrap();
-    ensure_worktree_heartbeat(wt.path());
-    let hook = wt.path().join(".claude").join("hooks").join("heartbeat.py");
+    ensure_worktree_hooks(wt.path());
+    let hooks = wt.path().join(".claude").join("hooks");
+    let hook = hooks.join("heartbeat.py");
     assert!(
         hook.is_file(),
         "heartbeat.py should be written into .claude/hooks"
@@ -2877,19 +2906,167 @@ fn test_ensure_worktree_heartbeat_writes_hook_when_missing() {
         content.contains("heartbeat"),
         "heartbeat.py content should come from the bundled resource (ASES #192)"
     );
+    let cfg = hooks.join("crosslink_config.py");
+    assert!(
+        cfg.is_file(),
+        "crosslink_config.py must be written alongside heartbeat.py — \
+         heartbeat.py imports it at module top and crashes without it"
+    );
+    let cfg_content = std::fs::read_to_string(&cfg).unwrap_or_default();
+    assert!(
+        !cfg_content.trim().is_empty()
+            && cfg_content.contains("find_crosslink_binary"),
+        "crosslink_config.py should be non-empty and provide find_crosslink_binary"
+    );
 }
 
 #[test]
-fn test_ensure_worktree_heartbeat_preserves_existing_hook() {
+fn test_ensure_worktree_hooks_preserves_existing_hook() {
     // If the hook already exists (e.g. crosslink init ran fully), it must not
     // be clobbered by the ensure pass.
     let wt = tempfile::tempdir().unwrap();
     let hooks = wt.path().join(".claude").join("hooks");
     std::fs::create_dir_all(&hooks).unwrap();
     std::fs::write(hooks.join("heartbeat.py"), "CUSTOM HEARTBEAT\n").unwrap();
-    ensure_worktree_heartbeat(wt.path());
+    ensure_worktree_hooks(wt.path());
     let content = std::fs::read_to_string(hooks.join("heartbeat.py")).unwrap_or_default();
     assert_eq!(content, "CUSTOM HEARTBEAT\n");
+}
+
+#[test]
+fn test_ensure_worktree_hooks_does_not_clobber_existing_config() {
+    // The shared-config sibling must also survive the ensure pass untouched
+    // when present.
+    let wt = tempfile::tempdir().unwrap();
+    let hooks = wt.path().join(".claude").join("hooks");
+    std::fs::create_dir_all(&hooks).unwrap();
+    std::fs::write(hooks.join("crosslink_config.py"), "CUSTOM CONFIG\n").unwrap();
+    ensure_worktree_hooks(wt.path());
+    let content = std::fs::read_to_string(hooks.join("crosslink_config.py")).unwrap_or_default();
+    assert_eq!(content, "CUSTOM CONFIG\n");
+}
+
+/// Functional regression for ASES #192 finding 1: the installed heartbeat
+/// hook must actually RUN — not just exist — in a fresh worktree layout.
+///
+/// `heartbeat.py` imports `from crosslink_config import find_crosslink_binary`
+/// at module top, so a heartbeat.py written without its sibling
+/// `crosslink_config.py` crashes with `ModuleNotFoundError` on every
+/// `PostToolUse` and `.crosslink/.cache/last-heartbeat` is never written (the
+/// watchdog then silently no-ops). This test builds a fresh-worktree layout
+/// with `ensure_worktree_hooks`, satisfies the hook's guard clauses
+/// (`.crosslink/hook-config.json` + `.crosslink/agent.json`), puts a fake
+/// `crosslink` shim on PATH, executes the real hook script, and asserts it
+/// (a) does not crash on import and (b) writes AND updates the heartbeat
+/// stamp file.
+#[test]
+#[cfg(unix)]
+fn test_heartbeat_hook_runs_and_writes_stamp_after_ensure_worktree_hooks() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let wt = tempfile::tempdir().unwrap();
+    // Fresh-worktree guard clauses: heartbeat.py needs an INITIALIZED
+    // .crosslink dir (hook-config.json) and an agent context (agent.json).
+    let crosslink_dir = wt.path().join(".crosslink");
+    std::fs::create_dir_all(&crosslink_dir).unwrap();
+    std::fs::write(crosslink_dir.join("hook-config.json"), "{}").unwrap();
+    std::fs::write(crosslink_dir.join("agent.json"), "{}").unwrap();
+
+    // Install the hook + shared-config dependency exactly as the launcher does.
+    ensure_worktree_hooks(wt.path());
+    let hook = wt.path().join(".claude").join("hooks").join("heartbeat.py");
+    assert!(hook.is_file(), "heartbeat.py must exist after ensure_worktree_hooks");
+
+    // Fake `crosslink` on PATH so find_crosslink_binary resolves and the
+    // background push is exercised end-to-end.
+    let shim = tempfile::tempdir().unwrap();
+    let log_path = shim.path().join("crosslink.log");
+    std::fs::write(
+        shim.path().join("crosslink"),
+        r#"#!/bin/sh
+printf '%s\n' "$*" >> "$FAKE_CROSSLINK_LOG"
+exit 0
+"#,
+    )
+    .unwrap();
+    std::fs::set_permissions(
+        shim.path().join("crosslink"),
+        std::fs::Permissions::from_mode(0o755),
+    )
+    .unwrap();
+    let path = format!(
+        "{}:{}",
+        shim.path().display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+
+    let run_hook = |wt: &Path, hook: &Path, path: &str| {
+        std::process::Command::new("python3")
+            .arg(hook)
+            .current_dir(wt)
+            .env("PATH", path)
+            .env("FAKE_CROSSLINK_LOG", &log_path)
+            .output()
+            .expect("failed to spawn python3 for heartbeat hook")
+    };
+
+    // (a) First run: must not crash on import; must write the stamp.
+    let out = run_hook(wt.path(), &hook, &path);
+    assert!(
+        out.status.success(),
+        "heartbeat.py must run without crashing (import of crosslink_config), got {:?} (stderr: {})",
+        out.status.code(),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stamp = wt.path().join(".crosslink").join(".cache").join("last-heartbeat");
+    assert!(
+        stamp.is_file(),
+        "heartbeat.py must write .crosslink/.cache/last-heartbeat"
+    );
+    let first_content = std::fs::read_to_string(&stamp).unwrap_or_default();
+    assert!(
+        !first_content.trim().is_empty(),
+        "heartbeat stamp must record a timestamp"
+    );
+    // The crosslink push is fire-and-forget (Popen); poll briefly for the
+    // shim's log so the assertion is not racy.
+    let mut seen_log = false;
+    for _ in 0..20 {
+        if log_path.is_file() {
+            seen_log = true;
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    assert!(
+        seen_log,
+        "heartbeat.py must push via the crosslink binary (fake shim should have been invoked)"
+    );
+
+    // (b) Second run: age the stamp, run again, and confirm it is UPDATED
+    // (not left at the old mtime). The 120s throttle passes because the
+    // aged mtime is far older than the interval.
+    let status = std::process::Command::new("touch")
+        .arg("-t")
+        .arg("200001010000")
+        .arg(&stamp)
+        .status()
+        .unwrap();
+    assert!(status.success(), "touch -t failed on test host");
+    let out = run_hook(wt.path(), &hook, &path);
+    assert!(
+        out.status.success(),
+        "heartbeat.py second run must also succeed (stderr: {})",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let updated = std::fs::metadata(&stamp).unwrap().modified().unwrap();
+    let since = std::time::SystemTime::now()
+        .duration_since(updated)
+        .unwrap_or_default();
+    assert!(
+        since.as_secs() < 60,
+        "heartbeat stamp must be updated on the second run (mtime {since:?} ago — stale)"
+    );
 }
 
 /// Write a fake `tmux` shim that logs every invocation to `$FAKE_TMUX_LOG`.

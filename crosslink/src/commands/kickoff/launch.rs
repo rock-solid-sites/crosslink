@@ -1,6 +1,6 @@
 // E-ana tablet — kickoff launch: agent launch infrastructure
 use anyhow::{bail, Context, Result};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
@@ -119,6 +119,20 @@ pub(super) fn read_watchdog_config(crosslink_dir: &Path) -> WatchdogConfig {
         cfg.stall_marker = Some(v.to_string());
     }
     cfg
+}
+
+/// Resolve the worktree-relative stall-evidence marker path the watchdog
+/// will write, honoring `watchdog.stall_marker` from hook-config.json.
+///
+/// ASES #192: the watchdog writes the configured marker (default
+/// `.kickoff-stalled`); the readers (`kickoff status`, `kickoff list`) must
+/// resolve the same path or a custom marker's evidence is written to a
+/// location `status`/`list` never read and silently disappears.
+pub(super) fn stall_marker_path(worktree_dir: &Path, crosslink_dir: &Path) -> PathBuf {
+    let marker = read_watchdog_config(crosslink_dir)
+        .stall_marker
+        .unwrap_or_else(|| ".kickoff-stalled".to_string());
+    worktree_dir.join(marker)
 }
 
 /// Build the watchdog shell script that monitors heartbeat staleness and
@@ -549,24 +563,41 @@ pub(super) fn create_worktree(
     Ok((worktree_dir, branch_name))
 }
 
-/// Ensure the worktree has the heartbeat hook that writes
-/// `.crosslink/.cache/last-heartbeat` on agent activity.
+/// Ensure the worktree has the heartbeat hook — and its shared-config
+/// dependency — so liveness evidence actually flows.
 ///
-/// `crosslink init` writes it, but init short-circuits when `.crosslink/` and
-/// `.claude/` already exist — the common case for a worktree freshly checked
-/// out from a branch that has both committed — and `.claude/hooks/` is
-/// gitignored, so a fresh worktree may lack `heartbeat.py`. Without the hook
-/// no heartbeat mtime flows and the watchdog has no liveness evidence to
-/// record (ASES #192 / #135 Phase 2). Best-effort: if the hook cannot be
-/// written, kickoff proceeds — liveness evidence is degraded, not fatal.
-pub(super) fn ensure_worktree_heartbeat(worktree_dir: &Path) {
+/// `crosslink init` writes both, but init short-circuits when `.crosslink/`
+/// and `.claude/` already exist — the common case for a worktree freshly
+/// checked out from a branch that has both committed — and `.claude/hooks/`
+/// is gitignored, so a fresh worktree may lack `heartbeat.py` **and**
+/// `crosslink_config.py`. `heartbeat.py` imports
+/// `from crosslink_config import find_crosslink_binary` at module top, so
+/// writing the hook without its sibling leaves the hook crashing with
+/// `ModuleNotFoundError` on every `PostToolUse`: `.crosslink/.cache/
+/// last-heartbeat` is never written and the watchdog has no liveness
+/// evidence to record (ASES #192 / #135 Phase 2).
+///
+/// This pass writes both files when missing, from the same bundled resources
+/// `crosslink init` uses. Best-effort: if either cannot be written, kickoff
+/// proceeds — liveness evidence is degraded, not fatal.
+pub(super) fn ensure_worktree_hooks(worktree_dir: &Path) {
     let wt_hooks = worktree_dir.join(".claude").join("hooks");
-    if !wt_hooks.join("heartbeat.py").exists() {
+    if !wt_hooks.join("crosslink_config.py").exists()
+        || !wt_hooks.join("heartbeat.py").exists()
+    {
         let _ = std::fs::create_dir_all(&wt_hooks);
-        let _ = std::fs::write(
-            wt_hooks.join("heartbeat.py"),
-            crate::commands::init::HEARTBEAT_PY,
-        );
+        if !wt_hooks.join("crosslink_config.py").exists() {
+            let _ = std::fs::write(
+                wt_hooks.join("crosslink_config.py"),
+                crate::commands::init::CROSSLINK_CONFIG_PY,
+            );
+        }
+        if !wt_hooks.join("heartbeat.py").exists() {
+            let _ = std::fs::write(
+                wt_hooks.join("heartbeat.py"),
+                crate::commands::init::HEARTBEAT_PY,
+            );
+        }
     }
 }
 
@@ -595,10 +626,11 @@ pub(super) fn init_worktree_agent(
         tracing::warn!("crosslink init in worktree: {}", stderr.trim());
     }
 
-    // ASES #192 / #135 Phase 2: ensure the heartbeat hook exists in the
-    // worktree even when init short-circuited. Without it, no heartbeat mtime
-    // flows and liveness evidence is empty.
-    ensure_worktree_heartbeat(worktree_dir);
+    // ASES #192 / #135 Phase 2: ensure the heartbeat hook (and its
+    // crosslink_config.py dependency) exists in the worktree even when init
+    // short-circuited. Without it, no heartbeat mtime flows and liveness
+    // evidence is empty.
+    ensure_worktree_hooks(worktree_dir);
 
     // Use the compact name as the agent ID directly
     let agent_id = compact_name.to_string();
@@ -839,7 +871,14 @@ pub(super) fn launch_container(
         "-d".to_string(),
         "--name".to_string(),
         container_name,
-        // Hard-kill the container after the timeout (grace period = 10s on top)
+        // `--stop-timeout` does NOT self-trigger: it only sets the SIGTERM
+        // grace period (seconds) that a later user-invoked `docker stop`
+        // will wait before SIGKILL. The container runs until it is stopped
+        // explicitly (`kickoff stop` / `container stop`) — no kill happens
+        // at this value. The actual destroyer guard for a wedged agent is
+        // the `timeout {backstop_secs}s` wrapper inside the container
+        // (ASES #192). This value is the guide duration, kept for
+        // compatibility with `docker stop` semantics.
         "--stop-timeout".to_string(),
         format!("{}", timeout_secs),
         // Mount the worktree as workspace

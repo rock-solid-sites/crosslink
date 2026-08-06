@@ -18,7 +18,7 @@ The user may pass these flags after the feature description:
 - `--issue <id>`: Use an existing crosslink issue instead of creating a new one.
 - `--container <runtime>`: Use `docker` or `podman` instead of local tmux. Default: `none`.
 - `--model <model>`: LLM model to use. Default: `opus`.
-- `--timeout <duration>`: Max runtime (e.g. `1h`, `30m`). Default: `1h`.
+- `--timeout <duration>`: Expected task duration (guide, e.g. `1h`, `30m`). The agent is NOT killed at this time — the value is recorded and displayed; a generous backstop (`max(timeout*24, 24h)`) only guards against a wedged process (ASES #192). Default: `1h`.
 - All other text is the feature description.
 
 **Parsing**: Split arguments on whitespace. Extract recognized `--flag value` pairs. Everything remaining is the feature description.

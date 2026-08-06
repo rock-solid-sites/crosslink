@@ -1,5 +1,5 @@
 {
-  "next_display_id": 798,
+  "next_display_id": 799,
   "next_comment_id": 1139,
   "display_id_map": {
     "00a365a3-7b31-465a-aced-4f1e39c68f8b": 118,
@@ -621,6 +621,7 @@
     "c505da24-1627-4a5f-8188-116d31c2b2d2": 522,
     "c55de574-5acd-4a22-bc21-4c756d0f55b7": 638,
     "c6041fc3-3a43-4f57-a7dc-52cca9b13d79": 518,
+    "c66a4338-cef5-44fa-bc52-a2230b30f5eb": 798,
     "c6735485-6282-401b-bc21-4df8283d3021": 128,
     "c6a9d77b-384b-468f-a080-cf2a8d323ff8": 162,
     "c6b072ad-e61c-486d-be17-6e77906ee0d4": 506,
@@ -19498,6 +19499,16 @@
         }
       }
     },
+    "c66a4338-cef5-44fa-bc52-a2230b30f5eb": {
+      "uuid": "c66a4338-cef5-44fa-bc52-a2230b30f5eb",
+      "display_id": 798,
+      "title": "FIX ASES #192: kickoff --timeout must not kill — generous backstop + evidence-stream watchdog + worktree heartbeat",
+      "status": "open",
+      "priority": "high",
+      "created_by": "driver",
+      "created_at": "2026-08-06T01:26:39.114413946Z",
+      "updated_at": "2026-08-06T01:26:39.114413946Z"
+    },
     "c6735485-6282-401b-bc21-4df8283d3021": {
       "uuid": "c6735485-6282-401b-bc21-4df8283d3021",
       "display_id": 128,
@@ -25050,11 +25061,16 @@
       "agent_id": "driver",
       "agent_seq": 26,
       "timestamp": "2026-08-03T06:11:09.339581506Z"
+    },
+    {
+      "agent_id": "driver",
+      "agent_seq": 27,
+      "timestamp": "2026-08-06T01:26:39.114413946Z"
     }
   ],
   "watermark": {
-    "timestamp": "2026-08-03T06:11:09.339581506Z",
+    "timestamp": "2026-08-06T01:26:39.114413946Z",
     "agent_id": "driver",
-    "agent_seq": 26
+    "agent_seq": 27
   }
 }

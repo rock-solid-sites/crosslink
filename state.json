@@ -1,6 +1,6 @@
 {
   "next_display_id": 799,
-  "next_comment_id": 1150,
+  "next_comment_id": 1151,
   "display_id_map": {
     "00a365a3-7b31-465a-aced-4f1e39c68f8b": 118,
     "01b74b94-82e0-4bda-9bed-7eace0292544": 70,
@@ -19507,7 +19507,7 @@
       "priority": "high",
       "created_by": "driver",
       "created_at": "2026-08-06T01:26:39.114413946Z",
-      "updated_at": "2026-08-06T03:21:20.709483011Z",
+      "updated_at": "2026-08-06T03:21:29.274067323Z",
       "labels": [
         "bug"
       ],
@@ -19556,6 +19556,15 @@
           "kind": "verdict",
           "signed_by": "SHA256:cx5PuRP0j7pktPKktl0WwbMp5uEwfFy9WoiBcgyhe18",
           "signature": "U1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAguEQKo5PmNONBqYSfFi6Ry6tvLy9D5GLM9YcPkF7QNdoAAAARY3Jvc3NsaW5rLWNvbW1lbnQAAAAAAAAABnNoYTUxMgAAAFMAAAALc3NoLWVkMjU1MTkAAABAVZNBU88QTjlTcLJJ/g/oxhtfg2Gx17lNIlAYTWatT2mGhR2yN50yCvz8JeUgcSE0k9cknbjHks+guL2Qy0GBAg=="
+        },
+        "794cce16-2f2a-4d5e-9c4b-8bd369e1245e": {
+          "display_id": 1150,
+          "author": "driver",
+          "content": "Review fixes for ASES #192 (#798) committed as 4efd9ae6: heartbeat hook now installs crosslink_config.py sibling (functional subprocess regression test), stall_marker_path helper syncs monitor readers with watchdog writer, docs/help-text drift corrected to guide semantics, docker --stop-timeout comment fixed, vacuous test assertion removed. kickoff::tests 193/193, full bin compiles, no new clippy warnings. Not pushed/installed/live-run per orchestrator.",
+          "created_at": "2026-08-06T03:21:29.268231314Z",
+          "kind": "handoff",
+          "signed_by": "SHA256:cx5PuRP0j7pktPKktl0WwbMp5uEwfFy9WoiBcgyhe18",
+          "signature": "U1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAguEQKo5PmNONBqYSfFi6Ry6tvLy9D5GLM9YcPkF7QNdoAAAARY3Jvc3NsaW5rLWNvbW1lbnQAAAAAAAAABnNoYTUxMgAAAFMAAAALc3NoLWVkMjU1MTkAAABAmSxZ77nZkGj7CQ7gXiQ7WZ74y4lbHjM4qr1K4yHsc99f8q4d7fXPzhyDSAUgLGq4GpPLzH+2/6CZJCZixL5fAA=="
         },
         "8ea6c62a-e476-4b55-af20-b845b81d010b": {
           "display_id": 1147,
@@ -25250,11 +25259,16 @@
       "agent_id": "driver",
       "agent_seq": 42,
       "timestamp": "2026-08-06T03:21:27.357526768Z"
+    },
+    {
+      "agent_id": "driver",
+      "agent_seq": 43,
+      "timestamp": "2026-08-06T03:21:29.274067323Z"
     }
   ],
   "watermark": {
-    "timestamp": "2026-08-06T03:21:27.357526768Z",
+    "timestamp": "2026-08-06T03:21:29.274067323Z",
     "agent_id": "driver",
-    "agent_seq": 42
+    "agent_seq": 43
   }
 }

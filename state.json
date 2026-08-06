@@ -1,6 +1,6 @@
 {
   "next_display_id": 799,
-  "next_comment_id": 1142,
+  "next_comment_id": 1143,
   "display_id_map": {
     "00a365a3-7b31-465a-aced-4f1e39c68f8b": 118,
     "01b74b94-82e0-4bda-9bed-7eace0292544": 70,
@@ -19511,7 +19511,7 @@
       "priority": "high",
       "created_by": "driver",
       "created_at": "2026-08-06T01:26:39.114413946Z",
-      "updated_at": "2026-08-06T02:31:03.372268882Z",
+      "updated_at": "2026-08-06T02:31:34.767138635Z",
       "labels": [
         "bug"
       ],
@@ -19542,6 +19542,15 @@
           "kind": "observation",
           "signed_by": "SHA256:cx5PuRP0j7pktPKktl0WwbMp5uEwfFy9WoiBcgyhe18",
           "signature": "U1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAguEQKo5PmNONBqYSfFi6Ry6tvLy9D5GLM9YcPkF7QNdoAAAARY3Jvc3NsaW5rLWNvbW1lbnQAAAAAAAAABnNoYTUxMgAAAFMAAAALc3NoLWVkMjU1MTkAAABAT5V7PvrnS11JYQ2ecYkm/73jKFHMc97ux6savAAik1uyCmqm83TnSYpxBDjo8h8wuM22orUUUqCA3MK2UHpqAg=="
+        },
+        "f724f561-3263-4f90-9f64-5286138d23dc": {
+          "display_id": 1142,
+          "author": "driver",
+          "content": "Committed: fix(kickoff): timeout as generous backstop, watchdog records stall evidence (ASES #192, [#798]) | Files: 7 files changed, 546 insertions(+), 36 deletions(-) — launch.rs (backstop helper + watchdog rewrite + heartbeat ensure + container backstop), types.rs (stall_marker, max_nudges deprecated), monitor.rs (heartbeat age + stalled display), helpers.rs (.kickoff-stalled exclude), plan.rs (backstop override), tests.rs (updated + new watchdog/stall/backstop/heartbeat tests), import.rs (pre-existing 2-line test-harness compile fix)",
+          "created_at": "2026-08-06T02:31:34.754075955Z",
+          "kind": "result",
+          "signed_by": "SHA256:cx5PuRP0j7pktPKktl0WwbMp5uEwfFy9WoiBcgyhe18",
+          "signature": "U1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAguEQKo5PmNONBqYSfFi6Ry6tvLy9D5GLM9YcPkF7QNdoAAAARY3Jvc3NsaW5rLWNvbW1lbnQAAAAAAAAABnNoYTUxMgAAAFMAAAALc3NoLWVkMjU1MTkAAABANd0NVce0VOfuX2uBTMzpMBx7XP7hc3JYS3iYSHHUYE5W3wqgiUu9nAzsRXhJEnoYlmuY0fgdPTnEZYkx1Qn7BA=="
         }
       }
     },
@@ -25127,11 +25136,16 @@
       "agent_id": "driver",
       "agent_seq": 32,
       "timestamp": "2026-08-06T02:31:03.372268882Z"
+    },
+    {
+      "agent_id": "driver",
+      "agent_seq": 33,
+      "timestamp": "2026-08-06T02:31:34.767138635Z"
     }
   ],
   "watermark": {
-    "timestamp": "2026-08-06T02:31:03.372268882Z",
+    "timestamp": "2026-08-06T02:31:34.767138635Z",
     "agent_id": "driver",
-    "agent_seq": 32
+    "agent_seq": 33
   }
 }

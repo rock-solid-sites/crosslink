@@ -389,6 +389,16 @@ impl SyncManager {
         std::fs::write(&key_file, format!("{public_key}\n"))?;
 
         self.git_in_cache(&["add", "trust/"])?;
+        // NOTE (gh#125, v2-branch writer #1 of 3): this commit lands on the
+        // cache worktree's CHECKED-OUT branch — on a v3 hub that is the frozen
+        // v2 `crosslink/hub` migration host (or the v3 host branch). Advancing
+        // that tip is HARMLESS since gh#125: `maybe_auto_hydrate` no longer
+        // runs the v2 file path when the v3 marker refs are present, so the
+        // tip movement no longer triggers a stale-file wipe. On v3 the commit
+        // is also a dead write for verification (v3 reads allowed_signers from
+        // the META_REF root). Residual tip churn on every key publication is
+        // accepted as documented out-of-scope — no v3 replacement write path
+        // exists in this task.
         // Use -c commit.gpgsign=false to bypass signing for key publishing
         let output = Command::new("git")
             .current_dir(&self.cache_dir)
@@ -604,6 +614,12 @@ fn commit_allowed_signers_unsigned(cache_dir: &Path, principal: &str) -> Result<
     };
 
     run(&["add", "trust/allowed_signers"])?;
+    // NOTE (gh#125, v2-branch writer #2 of 3): like `publish_agent_key`, the
+    // commit below advances the cache worktree's checked-out branch (the
+    // frozen v2 `crosslink/hub` on a v3 hub). Since gh#125 that tip movement
+    // is harmless — `maybe_auto_hydrate` no-ops when the v3 marker refs are
+    // present — so residual churn is accepted as documented out-of-scope (no
+    // v3 replacement write path in this task).
     // GH#738: when bootstrap was just completed (file written by the
     // caller before this commit), fold the state-flip into the same
     // atomic commit. Best-effort — if the file is absent or unchanged,

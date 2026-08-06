@@ -672,6 +672,78 @@ const fn classify_hub_version(
     }
 }
 
+/// Strict, fail-closed probe for the presence of a single ref.
+///
+/// Used only by [`hub_is_confidently_v2_only`] (the auto-hydration gate).
+/// Unlike [`git_rev_parse_optional`] — which collapses ANY non-zero
+/// `git rev-parse` exit into "ref absent" — this distinguishes the clean
+/// missing-ref signal (`--verify --quiet`: exit code 1 with empty stdout and
+/// stderr) from genuine detection doubt (git spawn failure, broken-ref
+/// warnings, `fatal:` diagnostics, unexpected exit codes). Any doubt is
+/// returned as `Err` so callers can skip the destructive v2 file path
+/// fail-closed (#125).
+fn strict_ref_present(repo_dir: &Path, ref_name: &str) -> Result<bool> {
+    let output = Command::new("git")
+        .current_dir(repo_dir)
+        .args(["rev-parse", "--verify", "--quiet", ref_name])
+        .output()
+        .with_context(|| format!("failed to run git rev-parse for '{ref_name}'"))?;
+
+    if output.status.success() {
+        return Ok(true);
+    }
+
+    // `git rev-parse --verify --quiet` reports a genuinely missing ref with
+    // exit code 1 and NO output on either stream. Anything else (e.g. a broken
+    // loose ref prints "warning: ignoring broken ref ..." to stderr, a
+    // non-git directory prints "fatal: not a git repository", a signal-killed
+    // git has no exit code) is detection doubt — fail closed by erroring so
+    // the caller skips the v2 file path.
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if output.status.code() == Some(1) && stdout.trim().is_empty() && stderr.trim().is_empty() {
+        return Ok(false);
+    }
+
+    anyhow::bail!(
+        "ref presence probe for '{ref_name}' returned {} (stdout: {:?}, stderr: {:?})",
+        output.status,
+        stdout.trim(),
+        stderr.trim()
+    )
+}
+
+/// Fail-closed hub-mode gate for the v2 auto-hydration file path (#125).
+///
+/// Returns `Ok(true)` ONLY when the hub is confidently v2-only: the v3 marker
+/// refs ([`META_REF`] + [`CHECKPOINT_REF`]) are both cleanly absent AND the
+/// legacy [`V2_HUB_BRANCH`] exists. Returns `Ok(false)` when the v3 marker
+/// refs are present (the v2 file path must never run) or when the hub is
+/// absent. Returns `Err` on any detection doubt (transient git failure, broken
+/// refs) — callers must treat an error as "skip the v2 path", i.e. fail
+/// closed.
+///
+/// This deliberately does NOT use [`HubMode::resolve`] / [`detect_hub_version`]:
+/// those collapse any non-zero `git rev-parse` exit into "ref absent" and
+/// [`HubMode::resolve`] degrades to `V2` on detection error (logging
+/// "defaulting to V2"). A gate built on that would silently re-enable the
+/// destructive v2 file path under a transient git failure — precisely the
+/// concurrent-launch race of the hydration failure catalog (#125).
+pub(crate) fn hub_is_confidently_v2_only(repo_dir: &Path) -> Result<bool> {
+    // Any Err from these probes is propagation of detection doubt; the caller
+    // must skip (fail-closed), never run the v2 file path.
+    let meta = strict_ref_present(repo_dir, META_REF)?;
+    let checkpoint = strict_ref_present(repo_dir, CHECKPOINT_REF)?;
+    if meta || checkpoint {
+        // v3 marker refs present: the hub is v3 (or mid-migration). The cache
+        // worktree's issue files are a stale migration host — never hydrate
+        // from them.
+        return Ok(false);
+    }
+    let v2 = strict_ref_present(repo_dir, V2_HUB_BRANCH)?;
+    Ok(v2)
+}
+
 // ── Operation mode (754a PASS 2) ──────────────────────────────────────
 
 /// Resolved operation mode for a hub, decided ONCE per `SyncManager` /

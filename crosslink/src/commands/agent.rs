@@ -665,6 +665,14 @@ pub fn bootstrap(
         Ok(())
     };
 
+    // NOTE (gh#125, v2-branch writer #3 of 3): the commit + push below advance
+    // the cache worktree's checked-out branch — on a v3 hub the frozen v2
+    // `crosslink/hub` host. Every kickoff launch moves that tip. Since gh#125
+    // the tip movement is harmless: `maybe_auto_hydrate` no-ops when the v3
+    // marker refs are present, so no stale-file wipe is triggered. Residual
+    // churn is accepted as documented out-of-scope — v3 agent registration
+    // belongs on `refs/heads/crosslink/agents/<id>` via the v3 commit
+    // primitives, which is not implemented in this task.
     git_in_cache(&["add", &format!("agents/{agent_id}/")])?;
     git_in_cache(&[
         "commit",

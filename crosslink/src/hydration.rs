@@ -1205,6 +1205,36 @@ pub fn maybe_auto_hydrate(crosslink_dir: &Path, db: &Database) -> Result<bool> {
         return Ok(false); // Hub hasn't moved — no re-hydration needed
     }
 
+    // FAIL-CLOSED GATE (gh#125): the v2 file path below reads
+    // `<hub-cache>/issues/*.json` from the cache worktree's checked-out
+    // branch. On a v3 hub that branch is a leftover migration host (or the
+    // frozen v2 branch) whose stale projection would be re-imported, wiping
+    // agent-authored rows that the v2 path's `created_by IS NULL`
+    // preservation filter drops. Run the v2 file path ONLY when the hub is
+    // confidently v2-only (no checkpoint/meta refs present); any detection
+    // doubt — transient git failure, broken refs — skips it (fail-closed).
+    // Reading-(a) semantics: when the v3 marker refs are present this function
+    // no-ops; v3 hydration stays on the existing mode-gated paths
+    // (`SharedWriter::hydrate_with_retry`, `sync_cmd`).
+    match crate::hub_v3::hub_is_confidently_v2_only(cache_dir) {
+        Ok(true) => {}
+        Ok(false) => {
+            tracing::debug!(
+                "hub is not confidently v2-only (v3 marker refs present or hub absent) — \
+                 skipping v2 file-path auto-hydration (gh#125)"
+            );
+            return Ok(false);
+        }
+        Err(e) => {
+            // Fail-closed: detection doubt must never run the destructive v2
+            // file path.
+            tracing::debug!(
+                "hub version detection doubt — skipping v2 file-path auto-hydration (gh#125): {e}"
+            );
+            return Ok(false);
+        }
+    }
+
     tracing::debug!(
         "hub ref moved ({} -> {}), auto-hydrating",
         last_ref.as_deref().unwrap_or("none"),
@@ -1260,6 +1290,8 @@ mod tests {
     };
     use chrono::Utc;
     use std::collections::BTreeSet;
+    use std::path::Path;
+    use std::process::Command;
     use tempfile::tempdir;
     use uuid::Uuid;
 
@@ -2214,6 +2246,212 @@ mod tests {
         assert!(
             db.get_issue(id).unwrap().is_none(),
             "tombstoned issue must not be resurrected"
+        );
+    }
+
+    // ── maybe_auto_hydrate fail-closed gate (gh#125) ──────────────────────
+
+    /// Create a git repo with `.crosslink/` and a hub-cache worktree checked
+    /// out on the legacy v2 branch (`refs/heads/crosslink/hub`).
+    ///
+    /// Returns `(tempdir, crosslink_dir, cache_dir)`. The tempdir must stay
+    /// alive for the duration of the test.
+    fn setup_git_env_with_v2_cache(
+    ) -> (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf) {
+        let dir = tempdir().unwrap();
+        let work = dir.path().join("work");
+        std::fs::create_dir_all(&work).unwrap();
+
+        let git = |args: &[&str]| {
+            let out = Command::new("git")
+                .current_dir(&work)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "git {:?} failed: {}",
+                args,
+                String::from_utf8_lossy(&out.stderr)
+            );
+            out
+        };
+
+        git(&["init", "-q", "-b", "main"]);
+        git(&["config", "user.email", "test@test.local"]);
+        git(&["config", "user.name", "Test"]);
+        std::fs::write(work.join("README.md"), "# test\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "-q", "-m", "init"]);
+
+        let crosslink_dir = work.join(".crosslink");
+        std::fs::create_dir_all(&crosslink_dir).unwrap();
+        std::fs::write(
+            crosslink_dir.join("hook-config.json"),
+            r#"{"remote":"origin"}"#,
+        )
+        .unwrap();
+
+        // The cache worktree hosts the v2 branch exactly as a v3 hub created
+        // via `init_cache`'s v2-first path would (ASES shape: the frozen v2
+        // branch stays checked out as a migration host).
+        let cache_dir = crosslink_dir.join(".hub-cache");
+        git(&[
+            "worktree",
+            "add",
+            "-b",
+            "crosslink/hub",
+            cache_dir.to_str().unwrap(),
+        ]);
+
+        (dir, crosslink_dir, cache_dir)
+    }
+
+    /// Create the v3 marker refs (`refs/heads/crosslink/meta` +
+    /// `refs/heads/crosslink/checkpoint`) in the test repo, pointing at the
+    /// current `main` tip. Ref presence is all the gate probes — the ref
+    /// contents are irrelevant for the auto-hydration decision.
+    fn create_v3_marker_refs(work: &Path) {
+        let head = Command::new("git")
+            .current_dir(work)
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .unwrap();
+        assert!(head.status.success(), "rev-parse HEAD failed");
+        let sha = String::from_utf8_lossy(&head.stdout).trim().to_string();
+        for r in [
+            "refs/heads/crosslink/meta",
+            "refs/heads/crosslink/checkpoint",
+        ] {
+            let out = Command::new("git")
+                .current_dir(work)
+                .args(["update-ref", r, &sha])
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "update-ref {r} failed");
+        }
+    }
+
+    /// Commit `issues` into the cache worktree as the stale v2 projection
+    /// (the frozen issue files that must never be auto-hydrated on a v3 hub).
+    fn write_stale_issues(cache_dir: &Path, issues: &[IssueFile]) {
+        let issues_dir = cache_dir.join("issues");
+        std::fs::create_dir_all(&issues_dir).unwrap();
+        for issue in issues {
+            let path = issues_dir.join(format!("{}.json", issue.uuid));
+            write_issue_file(&path, issue).unwrap();
+        }
+        let git = |args: &[&str]| {
+            let out = Command::new("git")
+                .current_dir(cache_dir)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "git {:?} failed in cache: {}",
+                args,
+                String::from_utf8_lossy(&out.stderr)
+            );
+            out
+        };
+        git(&["add", "issues/"]);
+        git(&["commit", "-q", "-m", "stale v2 issues"]);
+    }
+
+    #[test]
+    fn test_maybe_auto_hydrate_skips_v2_path_on_v3_hub() {
+        // gh#125 regression (gate test a): a v3 hub (meta + checkpoint refs
+        // present) whose cache worktree still carries stale v2 issue files must
+        // NOT run the v2 file path. The pre-fix behavior hydrated from the
+        // stale files, wiping fork-authored SQLite rows (the v2 path's
+        // preservation filter only keeps `created_by IS NULL` rows).
+        let (dir, crosslink_dir, cache_dir) = setup_git_env_with_v2_cache();
+        let work = dir.path().join("work");
+        create_v3_marker_refs(&work);
+
+        // Stale v2 projection: a hub issue present in the cache worktree but
+        // not in SQLite (simulates the frozen June-era files of the catalog).
+        let stale = make_issue(999, "stale v2 issue");
+        write_stale_issues(&cache_dir, &[stale]);
+
+        // Agent-authored SQLite row (created_by set) — the row the old v2 path
+        // dropped.
+        let (db, _tmp) = setup_test_db();
+        let id = db
+            .create_issue_with_author("agent row", None, "medium", Some("agent-7"))
+            .unwrap();
+
+        // No marker yet (fresh .crosslink) — the hub tip has "moved" relative
+        // to last hydration, so the auto-hydrate decision is exercised.
+        let hydrated = maybe_auto_hydrate(&crosslink_dir, &db).unwrap();
+        assert!(!hydrated, "v3 hub must NOT hydrate from the v2 file path");
+
+        let loaded = db.get_issue(id).unwrap().expect("agent row present");
+        assert_eq!(loaded.title, "agent row", "agent-authored row must survive");
+        assert!(
+            db.get_issue(999).unwrap().is_none(),
+            "stale v2 issue must NOT be imported"
+        );
+    }
+
+    #[test]
+    fn test_maybe_auto_hydrate_still_runs_on_v2_only_hub() {
+        // gh#125 regression (gate test b): the gate must not break legitimate
+        // v2 mode. A hub with ONLY the legacy `crosslink/hub` branch (no v3
+        // marker refs) still auto-hydrates from the v2 file path when the hub
+        // tip moves.
+        let (_dir, crosslink_dir, cache_dir) = setup_git_env_with_v2_cache();
+
+        let hub = make_issue(7, "v2 hub issue");
+        write_stale_issues(&cache_dir, &[hub]);
+
+        let (db, _tmp) = setup_test_db();
+        let hydrated = maybe_auto_hydrate(&crosslink_dir, &db).unwrap();
+        assert!(hydrated, "v2-only hub must still auto-hydrate");
+
+        let loaded = db.get_issue(7).unwrap().expect("v2 issue hydrated");
+        assert_eq!(loaded.title, "v2 hub issue");
+    }
+
+    #[test]
+    fn test_maybe_auto_hydrate_fail_closed_on_detection_error() {
+        // gh#125 regression (gate test c): when the v3-ref presence probe
+        // cannot conclude (broken ref), the gate must skip the v2 file path —
+        // fail-closed. The pre-fix detection (`HubMode::resolve` /
+        // `git_rev_parse_optional`) collapsed the broken ref into "absent",
+        // degraded to V2, and ran the destructive v2 file path.
+        let (dir, crosslink_dir, cache_dir) = setup_git_env_with_v2_cache();
+        let work = dir.path().join("work");
+        create_v3_marker_refs(&work);
+        // Corrupt the meta loose ref: `git rev-parse --verify --quiet` then
+        // exits non-zero with "warning: ignoring broken ref ..." on stderr —
+        // detection doubt, not a clean missing-ref signal.
+        std::fs::write(
+            work.join(".git").join("refs/heads/crosslink/meta"),
+            "garbage-not-a-sha\n",
+        )
+        .unwrap();
+
+        let stale = make_issue(999, "stale v2 issue");
+        write_stale_issues(&cache_dir, &[stale]);
+
+        let (db, _tmp) = setup_test_db();
+        let id = db
+            .create_issue_with_author("agent row", None, "medium", Some("agent-7"))
+            .unwrap();
+
+        let hydrated = maybe_auto_hydrate(&crosslink_dir, &db).unwrap();
+        assert!(
+            !hydrated,
+            "detection doubt must skip the v2 path (fail-closed)"
+        );
+
+        let loaded = db.get_issue(id).unwrap().expect("agent row present");
+        assert_eq!(loaded.title, "agent row", "agent-authored row must survive");
+        assert!(
+            db.get_issue(999).unwrap().is_none(),
+            "stale v2 issue must NOT be imported under detection doubt"
         );
     }
 }

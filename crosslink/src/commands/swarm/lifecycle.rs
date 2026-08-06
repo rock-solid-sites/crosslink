@@ -93,6 +93,12 @@ pub fn archive(crosslink_dir: &Path) -> Result<()> {
     // Stage all swarm/ changes (additions, modifications, and deletions) on the
     // hub branch cache. This is safe because the cache is a dedicated worktree
     // for crosslink/hub, not the user's working tree.
+    // NOTE (gh#125, v2-branch writer — swarm archive): the commit + push below
+    // advance the cache worktree's checked-out branch (the frozen v2
+    // `crosslink/hub` on a v3 hub). Since gh#125 that tip movement is harmless
+    // — `maybe_auto_hydrate` no-ops when the v3 marker refs are present — so
+    // residual churn is accepted as documented out-of-scope (no v3 replacement
+    // write path in this task).
     let cache = sync.cache_path();
     if let Ok(o) = std::process::Command::new("git")
         .current_dir(cache)
@@ -168,7 +174,13 @@ pub fn reset(crosslink_dir: &Path, no_archive: bool) -> Result<()> {
         let _ = std::fs::remove_dir_all(sync.cache_path().join(ctx.base));
     }
 
-    // Stage all swarm/ changes on the hub branch cache (see archive() comment).
+    // Stage all swarm/ changes on the checked-out hub-branch cache.
+    // NOTE (gh#125, v2-branch writer — swarm reset): the commit + push below
+    // advance the cache worktree's checked-out branch (the frozen v2
+    // `crosslink/hub` on a v3 hub). Since gh#125 that tip movement is harmless
+    // — `maybe_auto_hydrate` no-ops when the v3 marker refs are present — so
+    // residual churn is accepted as documented out-of-scope (no v3 replacement
+    // write path in this task).
     let cache = sync.cache_path();
     if let Ok(o) = std::process::Command::new("git")
         .current_dir(cache)

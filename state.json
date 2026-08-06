@@ -1,6 +1,6 @@
 {
   "next_display_id": 799,
-  "next_comment_id": 1143,
+  "next_comment_id": 1144,
   "display_id_map": {
     "00a365a3-7b31-465a-aced-4f1e39c68f8b": 118,
     "01b74b94-82e0-4bda-9bed-7eace0292544": 70,
@@ -19511,7 +19511,7 @@
       "priority": "high",
       "created_by": "driver",
       "created_at": "2026-08-06T01:26:39.114413946Z",
-      "updated_at": "2026-08-06T02:31:34.767138635Z",
+      "updated_at": "2026-08-06T02:31:38.638623942Z",
       "labels": [
         "bug"
       ],
@@ -19542,6 +19542,15 @@
           "kind": "observation",
           "signed_by": "SHA256:cx5PuRP0j7pktPKktl0WwbMp5uEwfFy9WoiBcgyhe18",
           "signature": "U1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAguEQKo5PmNONBqYSfFi6Ry6tvLy9D5GLM9YcPkF7QNdoAAAARY3Jvc3NsaW5rLWNvbW1lbnQAAAAAAAAABnNoYTUxMgAAAFMAAAALc3NoLWVkMjU1MTkAAABAT5V7PvrnS11JYQ2ecYkm/73jKFHMc97ux6savAAik1uyCmqm83TnSYpxBDjo8h8wuM22orUUUqCA3MK2UHpqAg=="
+        },
+        "cdd0018e-6c53-4b81-b867-cbccef43651f": {
+          "display_id": 1143,
+          "author": "driver",
+          "content": "[action] Committed 0e014c45 on feature/ases-192-timeout-backstop: backstop timeout + evidence-stream watchdog + worktree heartbeat (ASES #192, #798)",
+          "created_at": "2026-08-06T02:31:38.625779561Z",
+          "kind": "note",
+          "signed_by": "SHA256:cx5PuRP0j7pktPKktl0WwbMp5uEwfFy9WoiBcgyhe18",
+          "signature": "U1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAguEQKo5PmNONBqYSfFi6Ry6tvLy9D5GLM9YcPkF7QNdoAAAARY3Jvc3NsaW5rLWNvbW1lbnQAAAAAAAAABnNoYTUxMgAAAFMAAAALc3NoLWVkMjU1MTkAAABAZe/J+A50QsWGHYUrDWGfdkQZG5flR7X+fs4gKYCChyqGONolnDe+UZwmUOvy6s8FOEfKLux0Wy5JOU0u8iQrCg=="
         },
         "f724f561-3263-4f90-9f64-5286138d23dc": {
           "display_id": 1142,
@@ -25141,11 +25150,16 @@
       "agent_id": "driver",
       "agent_seq": 33,
       "timestamp": "2026-08-06T02:31:34.767138635Z"
+    },
+    {
+      "agent_id": "driver",
+      "agent_seq": 34,
+      "timestamp": "2026-08-06T02:31:38.638623942Z"
     }
   ],
   "watermark": {
-    "timestamp": "2026-08-06T02:31:34.767138635Z",
+    "timestamp": "2026-08-06T02:31:38.638623942Z",
     "agent_id": "driver",
-    "agent_seq": 33
+    "agent_seq": 34
   }
 }

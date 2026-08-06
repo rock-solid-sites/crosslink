@@ -1,6 +1,6 @@
 {
   "next_display_id": 799,
-  "next_comment_id": 1149,
+  "next_comment_id": 1150,
   "display_id_map": {
     "00a365a3-7b31-465a-aced-4f1e39c68f8b": 118,
     "01b74b94-82e0-4bda-9bed-7eace0292544": 70,
@@ -19511,11 +19511,20 @@
       "priority": "high",
       "created_by": "driver",
       "created_at": "2026-08-06T01:26:39.114413946Z",
-      "updated_at": "2026-08-06T03:21:00.972077787Z",
+      "updated_at": "2026-08-06T03:21:20.709483011Z",
       "labels": [
         "bug"
       ],
       "comments": {
+        "01691f58-871c-481a-a066-214012d71684": {
+          "display_id": 1149,
+          "author": "driver",
+          "content": "Result: review fixes committed as 4efd9ae6 (ASES #192, [#798]). 1) MAJOR: ensure_worktree_heartbeat renamed ensure_worktree_hooks — now writes .claude/hooks/crosslink_config.py from CROSSLINK_CONFIG_PY alongside heartbeat.py when either is missing (best-effort); new subprocess regression test executes the real heartbeat.py in a fresh-worktree layout with fake crosslink shim on PATH, proving import succeeds and last-heartbeat is written AND updated. 2) MINOR: new stall_marker_path(worktree_dir, crosslink_dir) helper reads watchdog.stall_marker via read_watchdog_config (default .kickoff-stalled); threaded into status + discover_agents; unit-tested for default+custom. 3) MINOR: hook-config.qmd watchdog section rewritten to evidence-recorder semantics (never kills/nudges, terminal-sentinel exit per #138), documents watchdog.stall_marker + kickoff.timeout_backstop_secs (default max(timeout*24,24h)); --timeout help in main.rs (Run/Plan/Launch) + embedded kickoff.md/SKILL.md updated to guide semantics (NOT killed). 4) NIT: vacuous {worktree} assertion removed. 5) NIT: docker --stop-timeout comment corrected (sets grace for later docker stop; does not self-trigger); value unchanged. Tests: kickoff::tests 193/193 PASS, full bin compiles (--no-run), clippy no NEW warnings (only pre-existing launch.rs:74 + main.rs:3414). No push/install/live-kickoff.",
+          "created_at": "2026-08-06T03:21:20.702823367Z",
+          "kind": "result",
+          "signed_by": "SHA256:cx5PuRP0j7pktPKktl0WwbMp5uEwfFy9WoiBcgyhe18",
+          "signature": "U1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAguEQKo5PmNONBqYSfFi6Ry6tvLy9D5GLM9YcPkF7QNdoAAAARY3Jvc3NsaW5rLWNvbW1lbnQAAAAAAAAABnNoYTUxMgAAAFMAAAALc3NoLWVkMjU1MTkAAABAxlgJAC+ndD6bFWt4IleZiBOOKh71a0Q5Fp0mKpfTzhD5rYsuOw8xIA2Enc5EDC6QTPVMeBFs3YGqJghFeS/UDw=="
+        },
         "1f0c1b5c-bf14-4344-9389-656ac37f38fa": {
           "display_id": 1139,
           "author": "driver",
@@ -25235,11 +25244,16 @@
       "agent_id": "driver",
       "agent_seq": 40,
       "timestamp": "2026-08-06T03:21:00.972077787Z"
+    },
+    {
+      "agent_id": "driver",
+      "agent_seq": 41,
+      "timestamp": "2026-08-06T03:21:20.709483011Z"
     }
   ],
   "watermark": {
-    "timestamp": "2026-08-06T03:21:00.972077787Z",
+    "timestamp": "2026-08-06T03:21:20.709483011Z",
     "agent_id": "driver",
-    "agent_seq": 40
+    "agent_seq": 41
   }
 }

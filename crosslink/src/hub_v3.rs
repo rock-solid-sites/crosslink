@@ -611,13 +611,15 @@ pub fn detect_hub_version(repo_dir: &Path) -> Result<HubVersion> {
 /// Unlike the local probe, an unreachable or unauthenticated remote is a hard
 /// error — the version of an unreachable remote must never be guessed (REQ-9).
 ///
+/// Production callers: [`v2_file_path_decision`] (the system-wide fail-closed
+/// v2 hydration gate) and `init_cache` (the v3-join decision for fresh clones
+/// of migrated projects, gh#125 r2 G1).
+///
 /// # Errors
 ///
 /// Returns an error if `git ls-remote` cannot be spawned, or if the remote is
 /// unreachable / unauthenticated / unknown (classified from stderr, paralleling
 /// the [`PushOutcome`] stderr discrimination).
-// Part-2 migrate/refusal logic is the production caller; flagged dead until then.
-#[allow(dead_code)]
 pub fn detect_remote_hub_version(repo_dir: &Path, remote: &str) -> Result<HubVersion> {
     let output = Command::new("git")
         .current_dir(repo_dir)
@@ -674,7 +676,7 @@ const fn classify_hub_version(
 
 /// Strict, fail-closed probe for the presence of a single ref.
 ///
-/// Used only by [`hub_is_confidently_v2_only`] (the auto-hydration gate).
+/// Used only by [`v2_file_path_decision`] (the system-wide v2 hydration gate).
 /// Unlike [`git_rev_parse_optional`] — which collapses ANY non-zero
 /// `git rev-parse` exit into "ref absent" — this distinguishes the clean
 /// missing-ref signal (`--verify --quiet`: exit code 1 with empty stdout and
@@ -713,15 +715,28 @@ fn strict_ref_present(repo_dir: &Path, ref_name: &str) -> Result<bool> {
     )
 }
 
-/// Fail-closed hub-mode gate for the v2 auto-hydration file path (#125).
+/// Fail-closed decision for the legacy v2 worktree-file hydration path
+/// (gh#125 r2).
 ///
-/// Returns `Ok(true)` ONLY when the hub is confidently v2-only: the v3 marker
-/// refs ([`META_REF`] + [`CHECKPOINT_REF`]) are both cleanly absent AND the
-/// legacy [`V2_HUB_BRANCH`] exists. Returns `Ok(false)` when the v3 marker
-/// refs are present (the v2 file path must never run) or when the hub is
-/// absent. Returns `Err` on any detection doubt (transient git failure, broken
-/// refs) — callers must treat an error as "skip the v2 path", i.e. fail
-/// closed.
+/// This is the SYSTEM-WIDE fail-closed boundary that every production caller of
+/// the destructive v2 file path ([`crate::hydration::hydrate_to_sqlite`]) must
+/// consult before running it. It returns:
+///
+/// - [`V2FilePathDecision::Allowed`] ONLY when the hub is confidently v2-only:
+///   the v3 marker refs ([`META_REF`] + [`CHECKPOINT_REF`]) are absent BOTH
+///   locally and on the configured remote, the legacy [`V2_HUB_BRANCH`] exists,
+///   and no remote is configured (a local-only hub cannot hide a remote v3).
+/// - [`V2FilePathDecision::Forbidden`] when the v3 marker refs are present
+///   locally or on the remote (a fresh clone of a migrated project has
+///   meta/checkpoint only as remote-tracking refs), when the hub is absent, or
+///   when detection is uncertain (broken refs, git spawn failure, unreachable /
+///   unauthenticated remote). Callers must treat Forbidden as "do not run the
+///   v2 file path", i.e. fail closed.
+///
+/// The REMOTE probe is authoritative: a configured but unreachable remote is a
+/// hard uncertainty — the v2 file path is skipped rather than run against a
+/// stale local projection while the remote may carry v3 markers (the exact
+/// fresh-clone failure of #125 r1).
 ///
 /// This deliberately does NOT use [`HubMode::resolve`] / [`detect_hub_version`]:
 /// those collapse any non-zero `git rev-parse` exit into "ref absent" and
@@ -729,19 +744,126 @@ fn strict_ref_present(repo_dir: &Path, ref_name: &str) -> Result<bool> {
 /// "defaulting to V2"). A gate built on that would silently re-enable the
 /// destructive v2 file path under a transient git failure — precisely the
 /// concurrent-launch race of the hydration failure catalog (#125).
-pub(crate) fn hub_is_confidently_v2_only(repo_dir: &Path) -> Result<bool> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum V2FilePathDecision {
+    /// Confidently v2-only — the v2 worktree-file hydration path may run.
+    Allowed,
+    /// The v2 file path must NOT run; `reason` explains the fail-closed skip.
+    Forbidden { reason: String },
+}
+
+impl V2FilePathDecision {
+    /// Whether the v2 file path is allowed to run.
+    #[must_use]
+    pub(crate) fn is_allowed(&self) -> bool {
+        matches!(self, Self::Allowed)
+    }
+
+    /// The fail-closed skip reason when [`Self::is_allowed`] is false.
+    #[must_use]
+    pub(crate) fn reason(&self) -> Option<&str> {
+        match self {
+            Self::Allowed => None,
+            Self::Forbidden { reason } => Some(reason),
+        }
+    }
+
+    fn forbidden(reason: impl Into<String>) -> Self {
+        Self::Forbidden {
+            reason: reason.into(),
+        }
+    }
+}
+
+/// The system-wide fail-closed decision for the v2 file path (gh#125 r2).
+///
+/// Probes the LOCAL refs first with [`strict_ref_present`]; when the local hub
+/// looks v2-only, consults the authoritative REMOTE state via
+/// [`detect_remote_hub_version`] before concluding. Any local probe doubt
+/// (broken ref, spawn failure), a remote that advertises v3 markers, or an
+/// unverifiable remote is a [`V2FilePathDecision::Forbidden`] — the destructive
+/// v2 file path must never run under remote/local uncertainty.
+pub(crate) fn v2_file_path_decision(repo_dir: &Path, remote: &str) -> V2FilePathDecision {
     // Any Err from these probes is propagation of detection doubt; the caller
     // must skip (fail-closed), never run the v2 file path.
-    let meta = strict_ref_present(repo_dir, META_REF)?;
-    let checkpoint = strict_ref_present(repo_dir, CHECKPOINT_REF)?;
+    let meta = match strict_ref_present(repo_dir, META_REF) {
+        Ok(v) => v,
+        Err(e) => {
+            return V2FilePathDecision::forbidden(format!(
+                "local ref probe for {META_REF} failed (detection doubt): {e}"
+            ))
+        }
+    };
+    let checkpoint = match strict_ref_present(repo_dir, CHECKPOINT_REF) {
+        Ok(v) => v,
+        Err(e) => {
+            return V2FilePathDecision::forbidden(format!(
+                "local ref probe for {CHECKPOINT_REF} failed (detection doubt): {e}"
+            ))
+        }
+    };
     if meta || checkpoint {
         // v3 marker refs present: the hub is v3 (or mid-migration). The cache
         // worktree's issue files are a stale migration host — never hydrate
         // from them.
-        return Ok(false);
+        return V2FilePathDecision::forbidden(
+            "v3 marker refs present locally (refs/heads/crosslink/meta + checkpoint); \
+             the cache worktree issue files are a stale migration host"
+                .to_string(),
+        );
     }
-    let v2 = strict_ref_present(repo_dir, V2_HUB_BRANCH)?;
-    Ok(v2)
+    let v2 = match strict_ref_present(repo_dir, V2_HUB_BRANCH) {
+        Ok(v) => v,
+        Err(e) => {
+            return V2FilePathDecision::forbidden(format!(
+                "local ref probe for {V2_HUB_BRANCH} failed (detection doubt): {e}"
+            ))
+        }
+    };
+    if !v2 {
+        return V2FilePathDecision::forbidden(
+            "no legacy v2 hub branch (refs/heads/crosslink/hub) present locally".to_string(),
+        );
+    }
+
+    // Locally the hub looks v2-only. Before trusting that conclusion, consult
+    // the authoritative remote state: a fresh clone of a migrated project
+    // carries meta/checkpoint ONLY as remote-tracking refs, so local-only
+    // probes would report "v2-only" and run the destructive path against a
+    // stale projection. A configured-but-unreachable remote is uncertainty ->
+    // fail closed (REQ-9 style: the version of an unverifiable remote is never
+    // guessed).
+    if !remote_configured(repo_dir, remote) {
+        // No remote configured — a local-only hub cannot hide a remote v3. The
+        // local v2-only conclusion stands.
+        return V2FilePathDecision::Allowed;
+    }
+    match detect_remote_hub_version(repo_dir, remote) {
+        Ok(HubVersion::V3 { .. }) => V2FilePathDecision::forbidden(format!(
+            "remote '{remote}' advertises v3 marker refs \
+             (refs/heads/crosslink/meta + refs/heads/crosslink/checkpoint); \
+             the local v2 projection is stale"
+        )),
+        Ok(HubVersion::V2Only | HubVersion::Absent) => V2FilePathDecision::Allowed,
+        Err(e) => V2FilePathDecision::forbidden(format!(
+            "cannot verify remote hub version for '{remote}' (unreachable or \
+             unauthenticated): {e}; treating remote/local uncertainty as a skip (fail-closed)"
+        )),
+    }
+}
+
+/// True when the named git remote is configured for `repo_dir`.
+///
+/// A missing remote means the hub is local-only: there is no remote state that
+/// could contradict the local v2-only conclusion, so the v2 file path may run.
+fn remote_configured(repo_dir: &Path, remote: &str) -> bool {
+    Command::new("git")
+        .current_dir(repo_dir)
+        .args(["remote", "get-url", remote])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
 }
 
 // ── Operation mode (754a PASS 2) ──────────────────────────────────────
@@ -4493,6 +4615,171 @@ mod tests {
             mk(a.path()),
             mk(b.path()),
             "README.md must be byte-identical across compactors"
+        );
+    }
+
+    // ── v2_file_path_decision (gh#125 r2 system-wide fail-closed gate) ─────
+
+    /// Create a v2-only local repo shape: a `crosslink/hub` branch with NO
+    /// v3 marker refs, returned as a tempdir.
+    fn v2_only_local() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        git_init(dir.path());
+        std::fs::write(dir.path().join("README.md"), "# t\n").unwrap();
+        run_git(dir.path(), &["add", "."]);
+        run_git(dir.path(), &["commit", "-m", "init", "--no-gpg-sign"]);
+        run_git(
+            dir.path(),
+            &["branch", "crosslink/hub", "HEAD"],
+        );
+        dir
+    }
+
+    #[test]
+    fn v2_file_path_decision_non_repo_forbidden() {
+        // Detection doubt (not a git repository) must fail closed.
+        let dir = tempfile::tempdir().unwrap();
+        let decision = v2_file_path_decision(dir.path(), "origin");
+        assert!(
+            !decision.is_allowed(),
+            "a non-git directory must never allow the v2 file path; got {decision:?}"
+        );
+    }
+
+    #[test]
+    fn v2_file_path_decision_local_v3_markers_forbidden() {
+        // Local v3 marker refs present → Forbidden (never run the v2 path).
+        let dir = v2_only_local();
+        run_git(
+            dir.path(),
+            &["update-ref", META_REF, "HEAD"],
+        );
+        run_git(
+            dir.path(),
+            &["update-ref", CHECKPOINT_REF, "HEAD"],
+        );
+        let decision = v2_file_path_decision(dir.path(), "origin");
+        assert!(
+            !decision.is_allowed(),
+            "local v3 marker refs must forbid the v2 file path; got {decision:?}"
+        );
+    }
+
+    #[test]
+    fn v2_file_path_decision_broken_ref_forbidden() {
+        // A broken loose ref (detection doubt) must fail closed even when the
+        // checkpoint is absent — the hy3 discriminating shape.
+        let dir = v2_only_local();
+        run_git(dir.path(), &["update-ref", META_REF, "HEAD"]);
+        std::fs::write(
+            dir.path().join(".git/refs/heads/crosslink/meta"),
+            "garbage-not-a-sha\n",
+        )
+        .unwrap();
+        let decision = v2_file_path_decision(dir.path(), "origin");
+        assert!(
+            !decision.is_allowed(),
+            "a broken marker ref must forbid the v2 file path (detection doubt); got {decision:?}"
+        );
+    }
+
+    #[test]
+    fn v2_file_path_decision_no_v2_branch_forbidden() {
+        // Hub absent (no v2 branch at all) → Forbidden.
+        let dir = tempfile::tempdir().unwrap();
+        git_init(dir.path());
+        std::fs::write(dir.path().join("README.md"), "# t\n").unwrap();
+        run_git(dir.path(), &["add", "."]);
+        run_git(dir.path(), &["commit", "-m", "init", "--no-gpg-sign"]);
+        let decision = v2_file_path_decision(dir.path(), "origin");
+        assert!(
+            !decision.is_allowed(),
+            "a hub with no v2 branch must not allow the v2 file path; got {decision:?}"
+        );
+    }
+
+    #[test]
+    fn v2_file_path_decision_v2_only_no_remote_allowed() {
+        // Confidently v2-only with NO configured remote → Allowed.
+        let dir = v2_only_local();
+        let decision = v2_file_path_decision(dir.path(), "origin");
+        assert!(
+            decision.is_allowed(),
+            "v2-only local hub with no remote must be allowed; got {decision:?}"
+        );
+    }
+
+    #[test]
+    fn v2_file_path_decision_remote_v3_forbidden() {
+        // Remote-only fail-open regression (item 2): local looks v2-only but
+        // the REMOTE advertises v3 markers → Forbidden.
+        let remote_dir = tempfile::tempdir().unwrap();
+        run_git(remote_dir.path(), &["init", "--bare"]);
+        let dir = v2_only_local();
+        run_git(
+            dir.path(),
+            &[
+                "remote",
+                "add",
+                "origin",
+                remote_dir.path().to_str().unwrap(),
+            ],
+        );
+        // Push the v2 branch, then create+push v3 markers so the remote is v3.
+        run_git(dir.path(), &["push", "origin", "crosslink/hub"]);
+        for r in [META_REF, CHECKPOINT_REF] {
+            run_git(dir.path(), &["update-ref", r, "HEAD"]);
+            run_git(dir.path(), &["push", "origin", r]);
+            run_git(dir.path(), &["update-ref", "-d", r]);
+        }
+        let decision = v2_file_path_decision(dir.path(), "origin");
+        assert!(
+            !decision.is_allowed(),
+            "remote v3 markers must forbid the v2 file path (remote-only fail-open); got {decision:?}"
+        );
+    }
+
+    #[test]
+    fn v2_file_path_decision_remote_v2_only_allowed() {
+        // Remote genuinely v2-only (only the v2 branch pushed) → Allowed.
+        let remote_dir = tempfile::tempdir().unwrap();
+        run_git(remote_dir.path(), &["init", "--bare"]);
+        let dir = v2_only_local();
+        run_git(
+            dir.path(),
+            &[
+                "remote",
+                "add",
+                "origin",
+                remote_dir.path().to_str().unwrap(),
+            ],
+        );
+        run_git(dir.path(), &["push", "origin", "crosslink/hub"]);
+        let decision = v2_file_path_decision(dir.path(), "origin");
+        assert!(
+            decision.is_allowed(),
+            "a v2-only remote must allow the v2 file path; got {decision:?}"
+        );
+    }
+
+    #[test]
+    fn v2_file_path_decision_unreachable_remote_forbidden() {
+        // A configured but unreachable remote is uncertainty → Forbidden
+        // (never run the v2 path against a stale local projection).
+        let dir = v2_only_local();
+        run_git(
+            dir.path(),
+            &[
+                "remote",
+                "add",
+                "origin",
+                "/nonexistent/remote/path/that/does/not/exist",
+            ],
+        );
+        let decision = v2_file_path_decision(dir.path(), "origin");
+        assert!(
+            !decision.is_allowed(),
+            "an unreachable remote must forbid the v2 file path (fail-closed); got {decision:?}"
         );
     }
 }

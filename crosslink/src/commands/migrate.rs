@@ -10,7 +10,7 @@ use std::path::Path;
 use uuid::Uuid;
 
 use crate::db::Database;
-use crate::hydration::hydrate_to_sqlite;
+use crate::hydration::hydrate_to_sqlite_exempt;
 use crate::identity::AgentConfig;
 use crate::issue_file::{
     write_counters, write_issue_file, write_milestone_file, CommentEntry, Counters, IssueFile,
@@ -258,8 +258,12 @@ pub fn from_shared(crosslink_dir: &Path, db: &Database) -> Result<()> {
         return Ok(());
     }
 
-    // Hydrate into SQLite
-    let stats = hydrate_to_sqlite(&cache_dir, db)?;
+    // Hydrate into SQLite. gh#125 r2 EXEMPT caller: `migrate-from-shared` is an
+    // explicit v2-only import command — the user asks to import shared JSON
+    // issue files into local SQLite, so the fail-closed gate deliberately does
+    // not apply (see `hydrate_to_sqlite_exempt`; enforced by the G5 inventory
+    // test).
+    let stats = hydrate_to_sqlite_exempt(&cache_dir, db)?;
 
     println!(
         "Imported from shared: {} issue(s), {} comment(s), {} dep(s), {} relation(s), {} milestone(s).",

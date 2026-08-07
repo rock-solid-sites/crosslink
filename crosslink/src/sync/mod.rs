@@ -40,9 +40,11 @@ pub use crate::signing::SignatureVerification;
 /// Same-machine hub write lock guard. Re-exported so `compaction::compact`
 /// can require it as proof that the caller holds the process mutex.
 pub use self::cache::HubWriteLock;
-// acquire_hub_lock is re-exported for test helpers in compaction and shared_writer.
-// In production code, callers acquire the lock via SyncManager::acquire_lock().
-#[cfg(test)]
+// acquire_hub_lock is re-exported for test helpers in compaction and
+// shared_writer AND for the system-wide fail-closed v2 hydration dispatcher
+// (hydration::hydrate_v2_safely, gh#125 r2), which serializes its
+// probe+hydrate decision against concurrent hub mutations (TOCTOU). Most
+// production callers acquire the lock via SyncManager::acquire_lock().
 pub use self::cache::acquire_hub_lock;
 pub use self::core::SyncManager;
 

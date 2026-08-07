@@ -604,6 +604,128 @@ fn test_init_cache_fresh_clone_joins_v3_remote() {
 }
 
 #[test]
+fn test_init_cache_joins_v3_when_remote_has_retained_v2_branch() {
+    // gh#125 r2 (G1 — PERMANENT-V2-LOCK-IN closure): a fresh clone of a
+    // MIGRATED project has BOTH a retained remote `crosslink/hub` v2 branch
+    // (kept alive by the legacy writers) AND remote v3 marker refs. The
+    // v2-first precedence must NOT lock the clone into V2 forever: when the
+    // remote authoritatively advertises v3 markers, init_cache must join the
+    // existing v3 hub and flip the cached mode to V3. Without the fix,
+    // init_cache takes the v2 worktree path (has_remote_v2), hub_mode stays
+    // V2, and every sync hydrates from the stale v2 projection — the original
+    // wipe, intact, in every fresh environment.
+    let (work_dir, remote_dir) = setup_sync_env();
+
+    // Create + push a retained v2 branch.
+    for args in [
+        vec!["checkout", "-q", "-b", "crosslink/hub"],
+        vec!["config", "user.email", "test@test.local"],
+        vec!["config", "user.name", "Test"],
+    ] {
+        Command::new("git")
+            .current_dir(work_dir.path())
+            .args(&args)
+            .output()
+            .unwrap();
+    }
+    std::fs::write(work_dir.path().join("v2.txt"), "v2\n").unwrap();
+    Command::new("git")
+        .current_dir(work_dir.path())
+        .args(["add", "."])
+        .output()
+        .unwrap();
+    Command::new("git")
+        .current_dir(work_dir.path())
+        .args(["commit", "-q", "-m", "v2 branch", "--no-gpg-sign"])
+        .output()
+        .unwrap();
+    Command::new("git")
+        .current_dir(work_dir.path())
+        .args(["push", "-q", "origin", "crosslink/hub"])
+        .output()
+        .unwrap();
+
+    // Create + push v3 marker refs.
+    let head = Command::new("git")
+        .current_dir(work_dir.path())
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .unwrap();
+    let sha = String::from_utf8_lossy(&head.stdout).trim().to_string();
+    for r in ["refs/heads/crosslink/meta", "refs/heads/crosslink/checkpoint"] {
+        Command::new("git")
+            .current_dir(work_dir.path())
+            .args(["update-ref", r, &sha])
+            .output()
+            .unwrap();
+    }
+    Command::new("git")
+        .current_dir(work_dir.path())
+        .args([
+            "push",
+            "-q",
+            "origin",
+            "refs/heads/crosslink/meta",
+            "refs/heads/crosslink/checkpoint",
+        ])
+        .output()
+        .unwrap();
+
+    // Fresh clone: local repo has NO crosslink/* refs, only the remote.
+    let work2 = tempfile::tempdir().unwrap();
+    for args in [
+        vec!["init", "-b", "main"],
+        vec!["config", "user.email", "test@test.local"],
+        vec!["config", "user.name", "Test"],
+        vec![
+            "remote",
+            "add",
+            "origin",
+            remote_dir.path().to_str().unwrap(),
+        ],
+        vec!["fetch", "origin", "main"],
+        vec!["checkout", "-b", "main", "origin/main"],
+    ] {
+        Command::new("git")
+            .current_dir(work2.path())
+            .args(&args)
+            .output()
+            .unwrap();
+    }
+    let cl2 = work2.path().join(".crosslink");
+    std::fs::create_dir_all(&cl2).unwrap();
+    std::fs::write(cl2.join("hook-config.json"), r#"{"remote":"origin"}"#).unwrap();
+
+    let manager2 = SyncManager::new(&cl2).unwrap();
+    manager2.init_cache().unwrap();
+
+    assert!(
+        manager2.hub_mode().is_v3(),
+        "fresh clone with remote v3 markers must join v3, not lock into V2 \
+         (permanent-V2-lock-in, gh#125 G1)"
+    );
+    // The cache worktree must be hosted on the v3 host branch, not the v2
+    // branch — the marker refs were adopted locally by the join. The retained
+    // remote v2 branch stays remote-tracking only (never checked out).
+    assert_eq!(
+        crate::hub_v3::detect_hub_version(&manager2.cache_dir).unwrap(),
+        crate::hub_v3::HubVersion::V3 {
+            v2_branch_present: false
+        },
+        "the joined cache must carry the v3 marker refs locally"
+    );
+    let head_branch = Command::new("git")
+        .current_dir(&manager2.cache_dir)
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .output()
+        .unwrap();
+    assert!(
+        String::from_utf8_lossy(&head_branch.stdout).trim() == HUB_V3_HOST_BRANCH,
+        "cache worktree must be on the v3 host branch, not crosslink/hub"
+    );
+}
+
+#[test]
 fn test_fresh_v3_hub_create_issue_end_to_end() {
     // Fresh repo bootstraps v3; a SharedWriter create_issue then yields an id
     // from the deterministic reduction (REQ-4), proving the event-only write +

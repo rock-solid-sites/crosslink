@@ -26,7 +26,6 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use crate::db::Database;
-use crate::hydration::hydrate_to_sqlite;
 use crate::sync::SyncManager;
 
 /// Background color for highlighted/selected rows. Uses a dark gray from the
@@ -528,10 +527,21 @@ impl App {
             if let Some(err) = result.error {
                 self.flash_message = Some(format!("Sync error: {err}"));
             } else {
-                // Hydrate local DB from the fetched coordination branch data
+                // Hydrate local DB from the fetched coordination branch data.
+                // gh#125 r2: route through the SYSTEM-WIDE fail-closed
+                // dispatcher — never call the destructive v2 file path
+                // unconditionally. On a v3 hub the dispatcher skips (the cache
+                // worktree files are a stale migration projection) and the TUI
+                // shows stale-but-safe data until the next explicit
+                // `crosslink sync`; on a confidently-v2-only hub it hydrates
+                // as before.
                 if let Ok(db) = Database::open(&self.db_path) {
                     // INTENTIONAL: hydration failure is non-fatal — TUI shows stale data until next sync
-                    let _ = hydrate_to_sqlite(&result.cache_path, &db);
+                    let _ = crate::hydration::hydrate_v2_safely(
+                        &self.crosslink_dir,
+                        &result.cache_path,
+                        &db,
+                    );
                 }
                 // Refresh the active tab to show updated data
                 self.tabs[self.active_tab].force_refresh();
@@ -830,7 +840,10 @@ pub fn run(db: &Database, crosslink_dir: &Path) -> anyhow::Result<()> {
         // INTENTIONAL: startup sync is best-effort — TUI works with stale local data if offline
         let _ = sync_mgr.init_cache();
         let _ = sync_mgr.fetch();
-        let _ = hydrate_to_sqlite(sync_mgr.cache_path(), db);
+        // gh#125 r2: route through the fail-closed dispatcher (never the
+        // unconditional destructive v2 file path — on a v3 hub it would import
+        // the stale v2 projection and wipe agent-authored rows).
+        let _ = crate::hydration::hydrate_v2_safely(crosslink_dir, sync_mgr.cache_path(), db);
     }
     eprintln!(" done.");
 

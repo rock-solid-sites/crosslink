@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 use crate::checkpoint::CheckpointState;
 use crate::db::{Database, SCHEMA_VERSION};
-use crate::hydration::{hydrate_from_state, hydrate_to_sqlite};
+use crate::hydration::{hydrate_from_state, hydrate_v2_safely, V2HydrateOutcome};
 use crate::identity::AgentConfig;
 use crate::issue_file::{
     read_all_issue_files, read_all_milestone_files, read_comment_files, read_counters,
@@ -343,6 +343,31 @@ fn check_hydration(
         });
     }
 
+    // gh#125 r2 (G2): the legacy v2 repair path below (clear_shared_data +
+    // v2 file-path hydration) is DESTRUCTIVE. On a v3 hub where the reduced
+    // state failed to resolve, running it would wipe agent-authored rows from
+    // the stale v2 projection. REFUSE the destructive repair whenever the
+    // system-wide fail-closed decision is not confidently-v2-only; the
+    // snapshot taken above is the recovery handle and `crosslink sync` the
+    // recovery path.
+    let v2_decision = crate::hub_v3::v2_file_path_decision(
+        &cache_dir,
+        &crate::sync::read_tracker_remote(crosslink_dir),
+    );
+    if !v2_decision.is_allowed() {
+        let reason = v2_decision
+            .reason()
+            .unwrap_or("unknown fail-closed reason");
+        return Ok(CheckResult {
+            name: "hydration".to_string(),
+            status: CheckStatus::Fail(format!(
+                "{summary}; refusing destructive v2 repair (fail-closed, gh#125): {reason}. \
+                 Run `crosslink sync` to re-hydrate from the hub, then re-run this check. \
+                 Snapshot at {snapshot_rel}."
+            )),
+        });
+    }
+
     // Try to re-emit SQLite-only state back to JSON when possible
     // (#602 fix #3). Requires an initialized SharedWriter; if one isn't
     // available (no agent.json / no hub branch), fall back to refusing
@@ -373,10 +398,26 @@ fn check_hydration(
     }
 
     // Now run the existing clear+rehydrate path. After re-emit the
-    // JSON event log is the union of both sides, so hydrate_to_sqlite
-    // restores everything that re-emit could express.
+    // JSON event log is the union of both sides, so the fail-closed v2
+    // dispatcher restores everything that re-emit could express. The
+    // dispatcher re-verifies the authoritative decision under the hub write
+    // lock (gh#125 r2).
     db.clear_shared_data()?;
-    let stats = hydrate_to_sqlite(&cache_dir, db)?;
+    let stats = match hydrate_v2_safely(crosslink_dir, &cache_dir, db)? {
+        V2HydrateOutcome::Hydrated(stats) => stats,
+        V2HydrateOutcome::Skipped { reason } => {
+            // The decision flipped between the pre-check and the dispatcher's
+            // locked re-check (should not happen — both consult the same
+            // refs — but fail closed rather than report a bogus repair).
+            return Ok(CheckResult {
+                name: "hydration".to_string(),
+                status: CheckStatus::Fail(format!(
+                    "{summary}; v2 repair refused (fail-closed, gh#125): {reason}. \
+                     Snapshot at {snapshot_rel}."
+                )),
+            });
+        }
+    };
 
     let mut parts: Vec<String> = vec![format!(
         "re-hydrated {} issues, {} comments",

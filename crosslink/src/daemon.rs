@@ -9,7 +9,7 @@ use std::thread;
 use std::time::Duration;
 
 use crate::db::Database;
-use crate::hydration::hydrate_to_sqlite;
+use crate::hydration::{hydrate_v2_safely, V2HydrateOutcome};
 
 const FLUSH_INTERVAL_SECS: u64 = 30;
 
@@ -272,14 +272,36 @@ pub fn run_daemon(crosslink_dir: &Path) -> Result<()> {
                                     if let Ok(db) = Database::open(&db_path) {
                                         // V3: hydrate from the reduced state (the
                                         // v3 fetch already adopted refs +
-                                        // compacted); V2 reads JSON files.
+                                        // compacted); V2 routes through the
+                                        // SYSTEM-WIDE fail-closed dispatcher
+                                        // (gh#125 r2) — the destructive v2 file
+                                        // path runs only when the authoritative
+                                        // decision (local refs + remote) is
+                                        // confidently-v2-only.
                                         let hydrate_result = if sync.hub_mode().is_v3() {
-                                            hydrate_v3_tick(sync.cache_path(), &db)
+                                            hydrate_v3_tick(sync.cache_path(), &db).map(Some)
                                         } else {
-                                            hydrate_to_sqlite(sync.cache_path(), &db)
+                                            match hydrate_v2_safely(
+                                                crosslink_dir,
+                                                sync.cache_path(),
+                                                &db,
+                                            )? {
+                                                V2HydrateOutcome::Hydrated(stats) => {
+                                                    Ok(Some(stats))
+                                                }
+                                                V2HydrateOutcome::Skipped { reason } => {
+                                                    tracing::warn!(
+                                                        "daemon: v2 hydration skipped \
+                                                         fail-closed (gh#125): {reason}; \
+                                                         SQLite is stale-but-safe — run \
+                                                         `crosslink sync` to recover"
+                                                    );
+                                                    Ok(None)
+                                                }
+                                            }
                                         };
                                         match hydrate_result {
-                                            Ok(stats) => {
+                                            Ok(Some(stats)) => {
                                                 crate::hydration::record_hydrated_ref(
                                                     crosslink_dir,
                                                 );
@@ -291,7 +313,10 @@ pub fn run_daemon(crosslink_dir: &Path) -> Result<()> {
                                                     );
                                                 }
                                             }
-                                            Err(e) => tracing::warn!("Hydration failed: {}", e),
+                                            Ok(None) => {}
+                                            Err(e) => {
+                                                tracing::warn!("Hydration failed: {}", e)
+                                            }
                                         }
                                     }
                                 }

@@ -179,7 +179,41 @@ impl SyncManager {
             .git_in_repo(&["rev-parse", "--verify", HUB_BRANCH])
             .is_ok();
 
-        if has_remote_v2 || has_local_v2 {
+        // gh#125 r2 (G1 — PERMANENT-V2-LOCK-IN closure): a fresh clone of a
+        // MIGRATED project has a retained remote `crosslink/hub` v2 branch
+        // (kept alive by the legacy writers: trust publish, agent bootstrap,
+        // swarm archive) AND remote v3 marker refs. The v2-first precedence
+        // below would lock the clone into V2 forever — `init_cache` would
+        // never reach the v3-join path, the cached `hub_mode` would stay V2,
+        // and every sync would hydrate from the stale v2 projection (the
+        // original wipe, intact, in every fresh environment). When the REMOTE
+        // authoritatively advertises v3 markers, join the existing v3 hub
+        // even though a retained v2 branch exists. (The v2 branch REF stays
+        // untouched for inspection/migration; only the cache worktree host
+        // changes.)
+        let remote_v3 = if has_remote_v2 || has_local_v2 {
+            self.remote_exists()
+                .then(|| self.remote.clone())
+                .filter(|r| {
+                    matches!(
+                        crate::hub_v3::detect_remote_hub_version(&self.repo_root, r),
+                        Ok(crate::hub_v3::HubVersion::V3 { .. })
+                    )
+                })
+        } else {
+            None
+        };
+
+        if let Some(remote) = remote_v3 {
+            // Fresh clone of a migrated project: create the v3 host worktree
+            // and fetch the v3 refs to join the existing hub.
+            self.init_v3_host_worktree()?;
+            crate::hub_v3::fetch_v3_refs_for_join(&self.cache_dir, &remote)?;
+            // The hub is now v3 locally — flip the cached mode (resolved as
+            // `V2` at construction from the local-only view, before these refs
+            // existed).
+            self.hub_mode.set(crate::hub_v3::HubMode::V3);
+        } else if has_remote_v2 || has_local_v2 {
             // V2 hub (read-only / migration path) — worktree it as today.
             self.init_v2_worktree(has_remote_v2, has_local_v2)?;
         } else {

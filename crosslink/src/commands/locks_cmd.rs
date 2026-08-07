@@ -2,7 +2,7 @@ use anyhow::Result;
 use std::path::Path;
 
 use crate::db::Database;
-use crate::hydration::hydrate_to_sqlite;
+use crate::hydration::{hydrate_v2_safely, V2HydrateOutcome};
 use crate::identity::AgentConfig;
 use crate::shared_writer::SharedWriter;
 use crate::sync::SyncManager;
@@ -244,7 +244,26 @@ pub fn sync_cmd(crosslink_dir: &Path, db: &Database) -> Result<()> {
     sync.fetch()?;
 
     if !sync.hub_mode().is_v3() {
-        return sync_v2_readonly(crosslink_dir, db, &sync);
+        // gh#125 r2: `hub_mode` was resolved at construction from LOCAL refs
+        // only and degrades to V2 on any detection error (HubMode::resolve
+        // "defaults to V2"). The SYSTEM-WIDE fail-closed decision consults the
+        // authoritative remote state too: a fresh clone of a migrated project
+        // looks locally v2-only while the remote advertises v3 markers. Only
+        // when the decision is confidently-v2-only may the legacy v2 read-only
+        // sync run; otherwise REFUSE (never hydrate from the stale v2
+        // projection).
+        let decision =
+            crate::hub_v3::v2_file_path_decision(sync.cache_path(), &sync.remote());
+        if decision.is_allowed() {
+            return sync_v2_readonly(crosslink_dir, db, &sync);
+        }
+        let reason = decision.reason().unwrap_or("unknown fail-closed reason");
+        anyhow::bail!(
+            "sync refused the legacy v2 hydration path (fail-closed, gh#125): {reason}. \
+             The local SQLite is left untouched (stale-but-safe). If this project's hub is v3, \
+             the cache should have joined it — retry, or run `crosslink compact`; if the hub is \
+             genuinely v2-only, make the configured remote reachable and retry `crosslink sync`."
+        );
     }
 
     // Ensure the agent's key is published to allowed_signers if it was deferred
@@ -297,17 +316,30 @@ pub fn sync_cmd(crosslink_dir: &Path, db: &Database) -> Result<()> {
     Ok(())
 }
 
-/// Read-only `crosslink sync` against a frozen v2 hub: hydrate from the worktree
-/// JSON files for inspection and print a single migrate hint. No writes.
+/// Read-only `crosslink sync` against a confidently-v2-only hub: hydrate from the
+/// worktree JSON files for inspection and print a single migrate hint. No writes.
+///
+/// gh#125 r2: the v2 file path runs through the system-wide fail-closed
+/// dispatcher ([`hydrate_v2_safely`]), which re-verifies the authoritative
+/// decision under the hub write lock before hydrating.
 fn sync_v2_readonly(crosslink_dir: &Path, db: &Database, sync: &SyncManager) -> Result<()> {
-    let stats = hydrate_to_sqlite(sync.cache_path(), db)?;
-    crate::hydration::record_hydrated_ref(crosslink_dir);
-    if stats.issues > 0 {
-        println!(
-            "Hydrated {} issue(s), {} comment(s), {} dep(s), {} relation(s), {} milestone(s) \
-             (read-only v2 inspection).",
-            stats.issues, stats.comments, stats.dependencies, stats.relations, stats.milestones
-        );
+    match hydrate_v2_safely(crosslink_dir, sync.cache_path(), db)? {
+        V2HydrateOutcome::Hydrated(stats) => {
+            crate::hydration::record_hydrated_ref(crosslink_dir);
+            if stats.issues > 0 {
+                println!(
+                    "Hydrated {} issue(s), {} comment(s), {} dep(s), {} relation(s), {} milestone(s) \
+                     (read-only v2 inspection).",
+                    stats.issues, stats.comments, stats.dependencies, stats.relations, stats.milestones
+                );
+            }
+        }
+        V2HydrateOutcome::Skipped { reason } => {
+            anyhow::bail!(
+                "sync v2 hydration skipped fail-closed (gh#125): {reason}; local SQLite is \
+                 stale-but-safe — retry when the remote is reachable or run `crosslink compact`"
+            );
+        }
     }
     println!("Cache: {}", sync.cache_path().display());
     println!(

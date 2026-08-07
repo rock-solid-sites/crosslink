@@ -25,7 +25,7 @@ use anyhow::{Context, Result};
 use std::path::Path;
 
 use crate::db::Database;
-use crate::hydration::hydrate_to_sqlite;
+use crate::hydration::hydrate_to_sqlite_exempt;
 
 /// Categorized record of every `SQLite` row that is not represented in
 /// the hydrated-from-`JSON` view of state.
@@ -188,7 +188,12 @@ pub fn detect(
             crate::hydration::hydrate_from_state(state, &temp_db)
                 .context("hydrate reduced state into temp database for drift detection")?;
         } else {
-            hydrate_to_sqlite(cache_dir, &temp_db)
+            // gh#125 r2 EXEMPT caller: this hydrates into an isolated TEMP
+            // database to build the drift-detection JSON view — it never
+            // touches the main SQLite, so the stale-v2-projection wipe cannot
+            // occur (see `hydrate_to_sqlite_exempt`; enforced by the G5
+            // inventory test).
+            hydrate_to_sqlite_exempt(cache_dir, &temp_db)
                 .context("hydrate JSON into temp database for drift detection")?;
         }
         // Explicit drop so the connection releases the file before ATTACH.
@@ -525,9 +530,11 @@ mod tests {
         .unwrap();
 
         // Hydrate the JSON view into the real db, then add a SQLite-only
-        // dependency row that was never written through SharedWriter.
+        // dependency row that was never written through SharedWriter. This is
+        // a TEST caller of the exempt temp-DB accessor (same non-destructive
+        // rationale as `detect`: isolated test database).
         let db = Database::open(&dir.path().join("test.db")).unwrap();
-        hydrate_to_sqlite(&cache_dir, &db).unwrap();
+        hydrate_to_sqlite_exempt(&cache_dir, &db).unwrap();
         db.add_dependency(2, 1).unwrap();
 
         let report = detect(&cache_dir, &db, None).unwrap();

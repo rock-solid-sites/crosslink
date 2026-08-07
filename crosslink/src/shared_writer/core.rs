@@ -196,6 +196,13 @@ impl SharedWriter {
     /// If the first attempt fails, prints a warning and retries once.
     /// If the retry also fails, warns the user to run `crosslink sync`
     /// so the caller can continue gracefully.
+    ///
+    /// gh#125 r2: the v2 branch routes through the SYSTEM-WIDE fail-closed
+    /// dispatcher (`hydrate_v2_safely`), which consults the authoritative
+    /// decision (local refs + remote) under the hub write lock. On a v3 hub
+    /// (or on remote/local uncertainty) the destructive v2 file path is
+    /// skipped with an observable warning — SQLite is stale-but-safe and
+    /// `crosslink sync` is the recovery.
     pub fn hydrate_with_retry(&self, db: &Database) {
         // V3: hydrate from the reduced state cached by the last commit_v3 /
         // refresh_v3_state (event-only operation — no worktree issue files to
@@ -217,14 +224,30 @@ impl SharedWriter {
             }
             return;
         }
-        match crate::hydration::hydrate_to_sqlite(&self.cache_dir, db) {
-            Ok(_) => {}
+        match crate::hydration::hydrate_v2_safely(
+            self.crosslink_dir(),
+            &self.cache_dir,
+            db,
+        ) {
+            Ok(crate::hydration::V2HydrateOutcome::Hydrated(_)) => {}
+            Ok(crate::hydration::V2HydrateOutcome::Skipped { reason }) => {
+                // Fail-closed skip is already warned by the dispatcher; keep a
+                // local trace so the mutation path records why hydration did
+                // not run.
+                tracing::debug!(
+                    "post-mutation v2 hydration skipped fail-closed (gh#125): {reason}"
+                );
+            }
             Err(first_err) => {
                 tracing::warn!(
                     "Warning: hydration failed ({}), retrying once...",
                     first_err
                 );
-                if let Err(retry_err) = crate::hydration::hydrate_to_sqlite(&self.cache_dir, db) {
+                if let Err(retry_err) = crate::hydration::hydrate_v2_safely(
+                    self.crosslink_dir(),
+                    &self.cache_dir,
+                    db,
+                ) {
                     tracing::warn!(
                         "Warning: hydration retry failed ({}). Run `crosslink sync` to recover.",
                         retry_err

@@ -116,10 +116,21 @@ struct SavedChildren {
 /// `SQLite`, hydration is skipped to avoid wiping SQLite-only issues that
 /// haven't been synced to JSON yet (e.g. after `init --force`).
 ///
+/// **Fail-closed boundary (gh#125 r2):** This is a DESTRUCTIVE operation — it
+/// clears all shared data and re-imports from the cache worktree files, whose
+/// `created_by IS NULL` preservation filter drops agent-authored rows. On a v3
+/// hub those worktree files are a stale migration projection. Production
+/// callers MUST go through [`hydrate_v2_safely`], which consults the
+/// system-wide fail-closed decision ([`crate::hub_v3::v2_file_path_decision`])
+/// under the hub write lock. This function is module-private so Rust itself
+/// prevents new direct callers; the only external entry points are
+/// [`hydrate_v2_safely`] and the explicit exemptions
+/// ([`hydrate_to_sqlite_exempt`], enforced by the G5 inventory test).
+///
 /// # Errors
 ///
 /// Returns an error if reading issue files or database operations fail.
-pub fn hydrate_to_sqlite(cache_dir: &Path, db: &Database) -> Result<HydrationStats> {
+fn hydrate_to_sqlite(cache_dir: &Path, db: &Database) -> Result<HydrationStats> {
     let issues_dir = cache_dir.join("issues");
     let issue_files = read_all_issue_files(&issues_dir)?;
 
@@ -274,6 +285,105 @@ pub fn hydrate_to_sqlite(cache_dir: &Path, db: &Database) -> Result<HydrationSta
     }
 
     result
+}
+
+/// Explicit escape hatch for the two DOCUMENTED exemptions from the fail-closed
+/// v2 boundary (gh#125 r2, G2/G5). This is the ONLY way to invoke the
+/// destructive v2 file path outside [`hydrate_v2_safely`]; the inventory test
+/// (`test_v2_hydration_entry_point_inventory`) asserts the caller allow-list.
+///
+/// Exempt callers (both are safe by construction):
+/// - `commands/migrate.rs` `from_shared` — the `migrate-from-shared` command is
+///   an explicit v2-only import: the user asks to import shared JSON issue
+///   files into local `SQLite`. Gate-restricting it would break the command.
+/// - `commands/integrity_drift.rs` `detect` — hydrates into an isolated TEMP
+///   database to build the drift-detection JSON view; it never touches the
+///   main `SQLite`, so the stale-projection wipe cannot occur.
+///
+/// # Errors
+///
+/// Returns an error if reading issue files or database operations fail.
+pub(crate) fn hydrate_to_sqlite_exempt(cache_dir: &Path, db: &Database) -> Result<HydrationStats> {
+    hydrate_to_sqlite(cache_dir, db)
+}
+
+/// Outcome of the fail-closed v2 hydration dispatcher ([`hydrate_v2_safely`]).
+#[derive(Debug)]
+pub(crate) enum V2HydrateOutcome {
+    /// The v2 file path ran and produced these stats.
+    Hydrated(HydrationStats),
+    /// The v2 file path was skipped fail-closed; `reason` explains why.
+    Skipped { reason: String },
+}
+
+/// SYSTEM-WIDE fail-closed dispatcher for the destructive v2 file path
+/// (gh#125 r2).
+///
+/// Every production hydration entry point that could run
+/// [`hydrate_to_sqlite`] must consult the fail-closed boundary
+/// ([`crate::hub_v3::v2_file_path_decision`]) under the hub write lock.
+/// [`maybe_auto_hydrate`] implements this inline (it additionally manages the
+/// freshness marker); the remaining callers route through this dispatcher:
+///
+/// - the TUI startup + periodic poll sync paths (`tui/mod.rs`)
+/// - `sync_v2_readonly` (`locks_cmd.rs` — `crosslink sync` on a v2 hub)
+/// - the daemon tick (`daemon.rs`)
+/// - `SharedWriter::hydrate_with_retry` (`shared_writer/core.rs`)
+/// - the integrity repair path (`integrity_cmd.rs`)
+///
+/// The dispatcher:
+///
+/// 1. Acquires the hub write lock ([`crate::sync::acquire_hub_lock`]) so the
+///    probe+hydrate sequence is serialized against concurrent hub mutations
+///    (bootstrap, fetch, v3 writes) — closing the TOCTOU window where a
+///    probe saying "v2-only" is followed by a concurrent v3 join before the
+///    hydrate reads the now-stale files (gh#125 r2 item 5).
+/// 2. Consults the system-wide decision
+///    [`crate::hub_v3::v2_file_path_decision`], which probes BOTH the local
+///    refs and the authoritative remote state.
+/// 3. Runs the v2 file path ONLY on [`crate::hub_v3::V2FilePathDecision::Allowed`];
+///    on `Forbidden` it emits an OBSERVABLE warning (not a silent debug log)
+///    stating the SQLite is stale-but-safe and the recovery is `crosslink sync`
+///    (gh#125 r2 G4).
+///
+/// Returns the outcome without propagating skip as an error — skipping is a
+/// legitimate fail-closed result, not a failure.
+pub(crate) fn hydrate_v2_safely(
+    crosslink_dir: &Path,
+    cache_dir: &Path,
+    db: &Database,
+) -> Result<V2HydrateOutcome> {
+    // Serialize probe+hydrate against concurrent hub mutations (TOCTOU).
+    // Lock acquisition failure (held by a live process >30s) is itself
+    // uncertainty — skip fail-closed rather than run the destructive path.
+    let lock_path = cache_dir.join(".hub-write-lock");
+    let _lock = match crate::sync::acquire_hub_lock(&lock_path) {
+        Ok(lock) => lock,
+        Err(e) => {
+            let reason = format!(
+                "could not acquire the hub write lock for the fail-closed probe (TOCTOU guard): {e}"
+            );
+            tracing::warn!(
+                "v2 file-path hydration skipped (fail-closed, gh#125): {reason}; SQLite is \
+                 stale-but-safe — run `crosslink sync` to recover"
+            );
+            return Ok(V2HydrateOutcome::Skipped { reason });
+        }
+    };
+
+    let remote = crate::sync::read_tracker_remote(crosslink_dir);
+    match crate::hub_v3::v2_file_path_decision(cache_dir, &remote) {
+        crate::hub_v3::V2FilePathDecision::Allowed => {
+            Ok(V2HydrateOutcome::Hydrated(hydrate_to_sqlite(cache_dir, db)?))
+        }
+        crate::hub_v3::V2FilePathDecision::Forbidden { reason } => {
+            tracing::warn!(
+                "v2 file-path hydration skipped (fail-closed, gh#125): {reason}; SQLite is \
+                 stale-but-safe — run `crosslink sync` to recover"
+            );
+            Ok(V2HydrateOutcome::Skipped { reason })
+        }
+    }
 }
 
 /// Hydrate the local `SQLite` database from a materialized v3
@@ -1205,32 +1315,62 @@ pub fn maybe_auto_hydrate(crosslink_dir: &Path, db: &Database) -> Result<bool> {
         return Ok(false); // Hub hasn't moved — no re-hydration needed
     }
 
-    // FAIL-CLOSED GATE (gh#125): the v2 file path below reads
+    // SYSTEM-WIDE FAIL-CLOSED GATE (gh#125 r2): the v2 file path below reads
     // `<hub-cache>/issues/*.json` from the cache worktree's checked-out
     // branch. On a v3 hub that branch is a leftover migration host (or the
     // frozen v2 branch) whose stale projection would be re-imported, wiping
     // agent-authored rows that the v2 path's `created_by IS NULL`
     // preservation filter drops. Run the v2 file path ONLY when the hub is
-    // confidently v2-only (no checkpoint/meta refs present); any detection
-    // doubt — transient git failure, broken refs — skips it (fail-closed).
-    // Reading-(a) semantics: when the v3 marker refs are present this function
-    // no-ops; v3 hydration stays on the existing mode-gated paths
+    // confidently v2-only per the authoritative decision
+    // ([`crate::hub_v3::v2_file_path_decision`] — local refs AND the remote);
+    // any detection doubt — transient git failure, broken refs, unreachable
+    // remote — skips it (fail-closed). Reading-(a) semantics: when the v3
+    // marker refs are present (locally or remotely) this function no-ops; v3
+    // hydration stays on the existing mode-gated paths
     // (`SharedWriter::hydrate_with_retry`, `sync_cmd`).
-    match crate::hub_v3::hub_is_confidently_v2_only(cache_dir) {
-        Ok(true) => {}
-        Ok(false) => {
-            tracing::debug!(
-                "hub is not confidently v2-only (v3 marker refs present or hub absent) — \
-                 skipping v2 file-path auto-hydration (gh#125)"
+    //
+    // TOCTOU (gh#125 r2 item 5): the probe+hydrate sequence below runs under
+    // the hub write lock so a concurrent bootstrap/fetch/v3 write cannot move
+    // the refs between "confidently v2-only" and the destructive read. The
+    // marker is re-checked under the lock so a concurrent process that already
+    // hydrated short-circuits here.
+    let _lock = match crate::sync::acquire_hub_lock(&cache_dir.join(".hub-write-lock")) {
+        Ok(lock) => lock,
+        Err(e) => {
+            // Lock contention (held by a live process >30s) is uncertainty —
+            // skip fail-closed without touching the marker (a later command
+            // retries once the lock frees).
+            tracing::warn!(
+                "v2 file-path auto-hydration skipped (fail-closed, gh#125): could not acquire \
+                 the hub write lock: {e}; SQLite is stale-but-safe — run `crosslink sync` to recover"
             );
             return Ok(false);
         }
-        Err(e) => {
-            // Fail-closed: detection doubt must never run the destructive v2
-            // file path.
-            tracing::debug!(
-                "hub version detection doubt — skipping v2 file-path auto-hydration (gh#125): {e}"
+    };
+
+    // Re-read the marker under the lock: another process may have hydrated
+    // while we waited for the lock.
+    let last_ref = std::fs::read_to_string(&marker_path)
+        .ok()
+        .map(|s| s.trim().to_string());
+    if last_ref.as_deref() == Some(&current_ref) {
+        return Ok(false);
+    }
+
+    let remote = crate::sync::read_tracker_remote(crosslink_dir);
+    match crate::hub_v3::v2_file_path_decision(cache_dir, &remote) {
+        crate::hub_v3::V2FilePathDecision::Allowed => {}
+        crate::hub_v3::V2FilePathDecision::Forbidden { reason } => {
+            // Fail-closed skip. G4: this is an OBSERVABLE warning (not a
+            // silent debug), with the documented recovery path.
+            tracing::warn!(
+                "v2 file-path auto-hydration skipped (fail-closed, gh#125): {reason}; SQLite is \
+                 stale-but-safe — run `crosslink sync` to recover"
             );
+            // G3: refresh the marker on the skip path so the probe only
+            // re-runs when the hub tip actually moves again (bounds the
+            // per-command probe overhead to real changes).
+            let _ = std::fs::write(&marker_path, &current_ref);
             return Ok(false);
         }
     }
@@ -2416,17 +2556,34 @@ mod tests {
 
     #[test]
     fn test_maybe_auto_hydrate_fail_closed_on_detection_error() {
-        // gh#125 regression (gate test c): when the v3-ref presence probe
-        // cannot conclude (broken ref), the gate must skip the v2 file path —
-        // fail-closed. The pre-fix detection (`HubMode::resolve` /
-        // `git_rev_parse_optional`) collapsed the broken ref into "absent",
-        // degraded to V2, and ran the destructive v2 file path.
+        // gh#125 r2 — hy3's DISCRIMINATING fixture (replaces the old gate test
+        // (c), which created BOTH markers and therefore passed under the old
+        // lenient probe too). Here the meta marker ref is BROKEN and the
+        // checkpoint ref is ABSENT, with the v2 branch present:
+        //   - strict probe (the committed gate): the meta probe hits detection
+        //     doubt (broken ref -> stderr warning) -> fail-closed skip.
+        //   - pre-fix lenient probe (`git_rev_parse_optional` / HubMode::resolve):
+        //     the broken meta collapses to "absent", checkpoint absent, v2
+        //     present -> "v2-only" -> the destructive v2 file path RUNS.
+        // This test FAILS under the lenient semantics and PASSES under the
+        // strict gate, proving the novel primitive discriminates.
         let (dir, crosslink_dir, cache_dir) = setup_git_env_with_v2_cache();
         let work = dir.path().join("work");
-        create_v3_marker_refs(&work);
-        // Corrupt the meta loose ref: `git rev-parse --verify --quiet` then
-        // exits non-zero with "warning: ignoring broken ref ..." on stderr —
-        // detection doubt, not a clean missing-ref signal.
+        // Create ONLY the meta marker ref, then corrupt it so the probe sees a
+        // broken ref rather than a clean absence. The checkpoint ref is never
+        // created — this is what makes the fixture discriminating.
+        let head = Command::new("git")
+            .current_dir(&work)
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .unwrap();
+        let sha = String::from_utf8_lossy(&head.stdout).trim().to_string();
+        let out = Command::new("git")
+            .current_dir(&work)
+            .args(["update-ref", "refs/heads/crosslink/meta", &sha])
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "update-ref meta failed");
         std::fs::write(
             work.join(".git").join("refs/heads/crosslink/meta"),
             "garbage-not-a-sha\n",
@@ -2444,7 +2601,8 @@ mod tests {
         let hydrated = maybe_auto_hydrate(&crosslink_dir, &db).unwrap();
         assert!(
             !hydrated,
-            "detection doubt must skip the v2 path (fail-closed)"
+            "detection doubt (broken meta + checkpoint absent) must skip the v2 path \
+             (fail-closed); the pre-fix lenient probe ran the destructive path here"
         );
 
         let loaded = db.get_issue(id).unwrap().expect("agent row present");
@@ -2452,6 +2610,327 @@ mod tests {
         assert!(
             db.get_issue(999).unwrap().is_none(),
             "stale v2 issue must NOT be imported under detection doubt"
+        );
+    }
+
+    /// Set up a work repo whose REMOTE advertises v3 marker refs while the
+    /// LOCAL repo has only the legacy v2 branch (no local v3 markers) — the
+    /// fresh-clone "remote-only" shape of the #125 r2 remote-only fail-open.
+    ///
+    /// Returns `(tempdir, crosslink_dir, cache_dir, remote_dir)`.
+    fn setup_remote_v3_local_v2_only() -> (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf, tempfile::TempDir) {
+        let remote_dir = tempdir().unwrap();
+        let dir = tempdir().unwrap();
+        let work = dir.path().join("work");
+        std::fs::create_dir_all(&work).unwrap();
+
+        let git = |args: &[&str]| {
+            let out = Command::new("git")
+                .current_dir(&work)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "git {:?} failed: {}",
+                args,
+                String::from_utf8_lossy(&out.stderr)
+            );
+            out
+        };
+
+        // Bare remote.
+        Command::new("git")
+            .current_dir(remote_dir.path())
+            .args(["init", "--bare", "-b", "main"])
+            .output()
+            .unwrap();
+
+        // Work repo with origin -> remote.
+        git(&["init", "-q", "-b", "main"]);
+        git(&["config", "user.email", "test@test.local"]);
+        git(&["config", "user.name", "Test"]);
+        git(&["remote", "add", "origin", remote_dir.path().to_str().unwrap()]);
+        std::fs::write(work.join("README.md"), "# test\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "-q", "-m", "init"]);
+
+        // Legacy v2 branch `crosslink/hub`, pushed to the remote (the retained
+        // v2 branch that the legacy writers keep alive).
+        git(&["checkout", "-q", "-b", "crosslink/hub"]);
+        std::fs::write(work.join("v2.txt"), "v2\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "-q", "-m", "v2 branch"]);
+        git(&["push", "-q", "origin", "crosslink/hub"]);
+
+        // v3 marker refs created locally and pushed to the REMOTE...
+        let head = Command::new("git")
+            .current_dir(&work)
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .unwrap();
+        let sha = String::from_utf8_lossy(&head.stdout).trim().to_string();
+        for r in ["refs/heads/crosslink/meta", "refs/heads/crosslink/checkpoint"] {
+            let out = Command::new("git")
+                .current_dir(&work)
+                .args(["update-ref", r, &sha])
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "update-ref {r} failed");
+        }
+        git(&["push", "-q", "origin", "refs/heads/crosslink/meta", "refs/heads/crosslink/checkpoint"]);
+
+        // ...then deleted LOCALLY, leaving the remote-only-v3 / local-v2-only
+        // shape the gate must detect (a fresh clone would see exactly this
+        // before the G1 v3-join: v2 branch + remote-tracking v3 markers).
+        for r in ["refs/heads/crosslink/meta", "refs/heads/crosslink/checkpoint"] {
+            git(&["update-ref", "-d", r]);
+        }
+        git(&["checkout", "-q", "main"]);
+
+        // .crosslink + hook-config (tracker remote inferred as "origin").
+        let crosslink_dir = work.join(".crosslink");
+        std::fs::create_dir_all(&crosslink_dir).unwrap();
+        std::fs::write(
+            crosslink_dir.join("hook-config.json"),
+            r#"{"remote":"origin"}"#,
+        )
+        .unwrap();
+
+        // Cache worktree on the v2 branch, exactly as `init_cache`'s v2-first
+        // path creates it (the shape the gate must refuse to hydrate from).
+        // The local `crosslink/hub` branch already exists, so no `-b`.
+        let cache_dir = crosslink_dir.join(".hub-cache");
+        git(&[
+            "worktree",
+            "add",
+            cache_dir.to_str().unwrap(),
+            "crosslink/hub",
+        ]);
+
+        (dir, crosslink_dir, cache_dir, remote_dir)
+    }
+
+    #[test]
+    fn test_maybe_auto_hydrate_remote_only_v3_markers_skips() {
+        // gh#125 r2 regression (item 2 — remote-only fail-open): the local
+        // cache is v2-only (no local meta/checkpoint refs, v2 branch present)
+        // while the REMOTE authoritatively advertises v3 markers. The gate
+        // must consult the remote and skip the destructive v2 file path.
+        // The r1 gate (local probes only) reported Ok(true) here and ran the
+        // destructive path — this test FAILS under r1 and PASSES with the
+        // remote probe.
+        let (dir, crosslink_dir, cache_dir, _remote_dir) = setup_remote_v3_local_v2_only();
+        let _work = dir.path().join("work");
+
+        // Sanity: the local probes alone would say v2-only (no local markers).
+        assert!(
+            crate::hub_v3::v2_file_path_decision(&cache_dir, "origin").is_allowed() == false,
+            "fixture precondition: the decision must be Forbidden (remote advertises v3)"
+        );
+
+        let stale = make_issue(999, "stale v2 issue");
+        write_stale_issues(&cache_dir, &[stale]);
+
+        let (db, _tmp) = setup_test_db();
+        let id = db
+            .create_issue_with_author("agent row", None, "medium", Some("agent-7"))
+            .unwrap();
+
+        let hydrated = maybe_auto_hydrate(&crosslink_dir, &db).unwrap();
+        assert!(
+            !hydrated,
+            "remote-only v3 markers must skip the v2 path (fail-closed)"
+        );
+
+        let loaded = db.get_issue(id).unwrap().expect("agent row present");
+        assert_eq!(loaded.title, "agent row", "agent-authored row must survive");
+        assert!(
+            db.get_issue(999).unwrap().is_none(),
+            "stale v2 issue must NOT be imported when the remote is v3"
+        );
+    }
+
+    #[test]
+    fn test_hydrate_v2_safely_skips_on_v3_hub() {
+        // gh#125 r2 — the fail-closed dispatcher used by the TUI startup and
+        // periodic-poll sync paths (and the daemon / shared_writer / sync v2
+        // branches). On a v3 hub (local marker refs present) it must SKIP the
+        // destructive v2 file path and leave the DB intact, even though the
+        // cache worktree carries stale v2 issue files.
+        let (dir, crosslink_dir, cache_dir) = setup_git_env_with_v2_cache();
+        let work = dir.path().join("work");
+        create_v3_marker_refs(&work);
+
+        let stale = make_issue(999, "stale v2 issue");
+        write_stale_issues(&cache_dir, &[stale]);
+
+        let (db, _tmp) = setup_test_db();
+        let id = db
+            .create_issue_with_author("agent row", None, "medium", Some("agent-7"))
+            .unwrap();
+
+        let outcome = crate::hydration::hydrate_v2_safely(&crosslink_dir, &cache_dir, &db)
+            .expect("dispatcher must not error on a fail-closed skip");
+        assert!(
+            matches!(
+                outcome,
+                crate::hydration::V2HydrateOutcome::Skipped { .. }
+            ),
+            "v3 hub must skip the v2 file path (fail-closed)"
+        );
+
+        let loaded = db.get_issue(id).unwrap().expect("agent row present");
+        assert_eq!(loaded.title, "agent row", "agent-authored row must survive");
+        assert!(
+            db.get_issue(999).unwrap().is_none(),
+            "stale v2 issue must NOT be imported on a v3 hub"
+        );
+    }
+
+    #[test]
+    fn test_hydrate_v2_safely_runs_on_v2_only_hub() {
+        // gh#125 r2 — the dispatcher must NOT break legitimate v2 mode: on a
+        // confidently-v2-only hub (no local markers, no remote configured) the
+        // v2 file path still runs.
+        let (_dir, crosslink_dir, cache_dir) = setup_git_env_with_v2_cache();
+
+        let hub = make_issue(7, "v2 hub issue");
+        write_stale_issues(&cache_dir, &[hub]);
+
+        let (db, _tmp) = setup_test_db();
+        let outcome = crate::hydration::hydrate_v2_safely(&crosslink_dir, &cache_dir, &db)
+            .expect("dispatcher must not error on a v2-only hydrate");
+        match outcome {
+            crate::hydration::V2HydrateOutcome::Hydrated(stats) => {
+                assert_eq!(stats.issues, 1, "the v2 issue must be hydrated");
+            }
+            crate::hydration::V2HydrateOutcome::Skipped { reason } => {
+                panic!("v2-only hub must hydrate, but was skipped fail-closed: {reason}");
+            }
+        }
+        let loaded = db.get_issue(7).unwrap().expect("v2 issue hydrated");
+        assert_eq!(loaded.title, "v2 hub issue");
+    }
+
+    #[test]
+    fn test_hydrate_v2_safely_skips_on_non_repo_cache() {
+        // gh#125 r2 — spawn failure / non-repo: the dispatcher on a cache dir
+        // that is not a git repository must SKIP fail-closed (the local probe
+        // errors: "fatal: not a git repository") rather than run the
+        // destructive v2 file path. This is the test for the git-spawn /
+        // non-repo detection-doubt arm.
+        let dir = tempdir().unwrap();
+        let crosslink_dir = dir.path().join(".crosslink");
+        std::fs::create_dir_all(&crosslink_dir).unwrap();
+        std::fs::write(
+            crosslink_dir.join("hook-config.json"),
+            r#"{"remote":"origin"}"#,
+        )
+        .unwrap();
+        // A plain (non-git) directory masquerading as the hub cache.
+        let cache_dir = crosslink_dir.join(".hub-cache");
+        std::fs::create_dir_all(&cache_dir).unwrap();
+
+        // A stale projection file the destructive path would import if it ran.
+        let stale = make_issue(999, "stale v2 issue");
+        write_issues_to_cache(&cache_dir, &[stale]);
+
+        let (db, _tmp) = setup_test_db();
+        let id = db
+            .create_issue_with_author("agent row", None, "medium", Some("agent-7"))
+            .unwrap();
+
+        let outcome = crate::hydration::hydrate_v2_safely(&crosslink_dir, &cache_dir, &db)
+            .expect("dispatcher must not error on a fail-closed skip");
+        assert!(
+            matches!(
+                outcome,
+                crate::hydration::V2HydrateOutcome::Skipped { .. }
+            ),
+            "non-repo cache must skip the v2 file path (fail-closed)"
+        );
+        let loaded = db.get_issue(id).unwrap().expect("agent row present");
+        assert_eq!(loaded.title, "agent row", "agent-authored row must survive");
+        assert!(
+            db.get_issue(999).unwrap().is_none(),
+            "stale v2 issue must NOT be imported from a non-repo cache"
+        );
+    }
+
+    #[test]
+    fn test_v2_hydration_entry_point_inventory() {
+        // gh#125 r2 (G5): mechanical enforcement that NO production caller
+        // invokes the destructive v2 file path outside the fail-closed
+        // boundary. `hydrate_to_sqlite` is module-private, so the only external
+        // entry points are `hydrate_v2_safely` (the dispatcher) and
+        // `hydrate_to_sqlite_exempt` (the two documented exemptions). This test
+        // scans the crate source and asserts the exemption caller allow-list.
+        fn scan(dir: &std::path::Path, direct: &mut Vec<(String, usize)>, exempt: &mut Vec<(String, usize)>) {
+            for entry in std::fs::read_dir(dir).unwrap() {
+                let entry = entry.unwrap();
+                let path = entry.path();
+                if path.is_dir() {
+                    scan(&path, direct, exempt);
+                } else if path.extension().and_then(|e| e.to_str()) == Some("rs") {
+                    let rel = path
+                        .strip_prefix(env!("CARGO_MANIFEST_DIR"))
+                        .unwrap()
+                        .to_string_lossy()
+                        .into_owned();
+                    for (idx, line) in std::fs::read_to_string(&path).unwrap().lines().enumerate() {
+                        let trimmed = line.trim_start();
+                        // Skip comment lines (doc comments mention the fns).
+                        if trimmed.starts_with("//") {
+                            continue;
+                        }
+                        if line.contains("hydrate_to_sqlite_exempt(") {
+                            exempt.push((rel.clone(), idx + 1));
+                        }
+                        if line.contains("hydrate_to_sqlite(")
+                            && !line.contains("hydrate_to_sqlite_exempt(")
+                        {
+                            direct.push((rel.clone(), idx + 1));
+                        }
+                    }
+                }
+            }
+        }
+        let src_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut direct: Vec<(String, usize)> = Vec::new();
+        let mut exempt: Vec<(String, usize)> = Vec::new();
+        scan(&src_dir, &mut direct, &mut exempt);
+
+        // `hydrate_to_sqlite(` outside hydration.rs is forbidden: the fn is
+        // module-private, so any occurrence is at minimum a stale reference.
+        let direct_outside: Vec<_> = direct
+            .iter()
+            .filter(|(f, _)| f != "src/hydration.rs")
+            .cloned()
+            .collect();
+        assert!(
+            direct_outside.is_empty(),
+            "direct hydrate_to_sqlite( callers outside hydration.rs (G5 violation): {direct_outside:?}"
+        );
+
+        // `hydrate_to_sqlite_exempt(` is the explicit escape hatch — exactly
+        // the two documented exemptions may use it. hydration.rs is excluded:
+        // it holds the definition and this test's own assertion strings.
+        let exempt_files: std::collections::BTreeSet<String> = exempt
+            .iter()
+            .filter(|(f, _)| f != "src/hydration.rs")
+            .map(|(f, _)| f.clone())
+            .collect();
+        let expected: std::collections::BTreeSet<String> = [
+            "src/commands/integrity_drift.rs".to_string(),
+            "src/commands/migrate.rs".to_string(),
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(
+            exempt_files, expected,
+            "hydrate_to_sqlite_exempt callers must be exactly the two documented \
+             exemptions (integrity_drift temp-DB + migrate v2-only import); found: {exempt:?}"
         );
     }
 }

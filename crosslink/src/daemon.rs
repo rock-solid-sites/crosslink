@@ -281,15 +281,19 @@ pub fn run_daemon(crosslink_dir: &Path) -> Result<()> {
                                         let hydrate_result = if sync.hub_mode().is_v3() {
                                             hydrate_v3_tick(sync.cache_path(), &db).map(Some)
                                         } else {
+                                            // NB: do NOT `?` the dispatcher here —
+                                            // the tick must warn-and-continue on
+                                            // hydration errors, not abort the
+                                            // daemon loop (original semantics).
                                             match hydrate_v2_safely(
                                                 crosslink_dir,
                                                 sync.cache_path(),
                                                 &db,
-                                            )? {
-                                                V2HydrateOutcome::Hydrated(stats) => {
+                                            ) {
+                                                Ok(V2HydrateOutcome::Hydrated(stats)) => {
                                                     Ok(Some(stats))
                                                 }
-                                                V2HydrateOutcome::Skipped { reason } => {
+                                                Ok(V2HydrateOutcome::Skipped { reason }) => {
                                                     tracing::warn!(
                                                         "daemon: v2 hydration skipped \
                                                          fail-closed (gh#125): {reason}; \
@@ -298,6 +302,7 @@ pub fn run_daemon(crosslink_dir: &Path) -> Result<()> {
                                                     );
                                                     Ok(None)
                                                 }
+                                                Err(e) => Err(e),
                                             }
                                         };
                                         match hydrate_result {

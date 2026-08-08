@@ -472,6 +472,7 @@ fn spawn_agent(
         timeout: scope.timeout,
         dry_run: false,
         branch: None,
+        base: None,
         quiet: true,
         design_doc: None,
         doc_path: None,

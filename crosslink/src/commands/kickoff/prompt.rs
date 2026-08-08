@@ -191,6 +191,15 @@ pub(crate) fn build_prompt(
 ) -> String {
     let verify_name = verify_level_name(&opts.verify);
 
+    // When the worktree was branched from a specific ref (`--base`, GH#283),
+    // tell the agent its branch point so it knows parent work is already
+    // present — no merge needed. The branch name alone does not carry this:
+    // a phase-on-phase kickoff branches from the parent feature branch, and
+    // the agent must not re-create or merge that work.
+    let base_line = opts.base.map_or_else(String::new, |base| {
+        format!("- **Base**: `{base}` — branched from here; parent work is already present — no merge needed\n")
+    });
+
     let mut prompt = format!(
         r#"# KICKOFF: {description}
 
@@ -198,7 +207,7 @@ pub(crate) fn build_prompt(
 
 - **Issue**: #{issue_id}
 - **Branch**: `{branch_name}`
-- **Verification level**: {verify_name}
+{base_line}- **Verification level**: {verify_name}
 
 ## Feature Description
 
@@ -254,6 +263,7 @@ these, ask the user to run it manually:
         description = opts.description,
         issue_id = issue_id,
         branch_name = branch_name,
+        base_line = base_line,
         verify_name = verify_name,
     );
 

@@ -88,6 +88,14 @@ pub struct KickoffOpts<'a> {
     pub timeout: Duration,
     pub dry_run: bool,
     pub branch: Option<&'a str>,
+    /// Ref to branch the new worktree from (e.g. a parent feature branch).
+    ///
+    /// `None` (default) branches from `HEAD` (main for a fresh checkout).
+    /// When set, the base ref is verified with `git rev-parse --verify`
+    /// before the worktree is created and the KICKOFF.md brief tells the
+    /// agent its branch point so parent work is present — no merge needed.
+    /// See GH#283.
+    pub base: Option<&'a str>,
     pub quiet: bool,
     pub design_doc: Option<&'a super::super::design_doc::DesignDoc>,
     pub doc_path: Option<&'a str>,
@@ -223,6 +231,9 @@ pub struct PlanOpts<'a> {
     pub timeout: Duration,
     pub dry_run: bool,
     pub issue: Option<i64>,
+    /// Ref to branch the plan worktree from (mirrors `kickoff run --base`).
+    /// `None` (default) branches from `HEAD`. See GH#283.
+    pub base: Option<&'a str>,
     pub quiet: bool,
     /// Agent binary to launch (read from hook-config.json `agent.binary`,
     /// default "claude").

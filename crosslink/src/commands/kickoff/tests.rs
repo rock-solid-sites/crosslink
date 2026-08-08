@@ -141,6 +141,7 @@ fn test_build_prompt_contains_essentials() {
         timeout: Duration::from_secs(3600),
         dry_run: false,
         branch: None,
+        base: None,
         quiet: false,
         design_doc: None,
         doc_path: None,
@@ -176,6 +177,7 @@ fn test_build_prompt_ci_verification() {
         timeout: Duration::from_secs(3600),
         dry_run: false,
         branch: None,
+        base: None,
         quiet: false,
         design_doc: None,
         doc_path: None,
@@ -208,6 +210,7 @@ fn test_build_prompt_thorough_verification() {
         timeout: Duration::from_secs(3600),
         dry_run: false,
         branch: None,
+        base: None,
         quiet: false,
         design_doc: None,
         doc_path: None,
@@ -892,6 +895,7 @@ fn test_build_prompt_local_has_no_ci_or_adversarial() {
         timeout: Duration::from_secs(3600),
         dry_run: false,
         branch: None,
+        base: None,
         quiet: false,
         design_doc: None,
         doc_path: None,
@@ -924,6 +928,7 @@ fn test_build_prompt_contains_blocked_actions() {
         timeout: Duration::from_secs(3600),
         dry_run: false,
         branch: None,
+        base: None,
         quiet: false,
         design_doc: None,
         doc_path: None,
@@ -957,6 +962,7 @@ fn test_build_prompt_embeds_issue_id_in_instructions() {
         timeout: Duration::from_secs(3600),
         dry_run: false,
         branch: None,
+        base: None,
         quiet: false,
         design_doc: None,
         doc_path: None,
@@ -990,6 +996,7 @@ fn test_build_prompt_empty_conventions_uses_generic_instructions() {
         timeout: Duration::from_secs(3600),
         dry_run: false,
         branch: None,
+        base: None,
         quiet: false,
         design_doc: None,
         doc_path: None,
@@ -1035,6 +1042,7 @@ fn test_build_prompt_with_design_doc() {
         timeout: Duration::from_secs(3600),
         dry_run: false,
         branch: None,
+        base: None,
         quiet: false,
         design_doc: Some(&doc),
         doc_path: None,
@@ -1183,6 +1191,7 @@ fn test_build_prompt_with_design_doc_open_questions() {
         timeout: Duration::from_secs(3600),
         dry_run: false,
         branch: None,
+        base: None,
         quiet: false,
         design_doc: Some(&doc),
         doc_path: None,
@@ -1357,6 +1366,7 @@ fn test_build_prompt_with_criteria_includes_validation() {
         timeout: Duration::from_secs(3600),
         dry_run: false,
         branch: None,
+        base: None,
         quiet: false,
         design_doc: Some(&doc),
         doc_path: None,
@@ -1400,6 +1410,7 @@ fn test_build_prompt_without_criteria_no_validation() {
         timeout: Duration::from_secs(3600),
         dry_run: false,
         branch: None,
+        base: None,
         quiet: false,
         design_doc: Some(&doc),
         doc_path: None,
@@ -1440,6 +1451,7 @@ fn test_build_prompt_validation_ordering() {
         timeout: Duration::from_secs(3600),
         dry_run: false,
         branch: None,
+        base: None,
         quiet: false,
         design_doc: Some(&doc),
         doc_path: None,
@@ -2592,6 +2604,7 @@ fn test_build_prompt_contains_report_json_schema() {
         timeout: Duration::from_secs(3600),
         dry_run: false,
         branch: None,
+        base: None,
         quiet: false,
         design_doc: Some(&doc),
         doc_path: Some("test.md"),
@@ -2642,6 +2655,7 @@ fn test_build_prompt_contains_validation_section() {
         timeout: Duration::from_secs(3600),
         dry_run: false,
         branch: None,
+        base: None,
         quiet: false,
         design_doc: Some(&doc),
         doc_path: Some("test.md"),
@@ -3634,4 +3648,284 @@ fn test_reconcile_completion_by_worktree_scans_design_dir() {
     let reread = pipeline::read_pipeline_state(&doc).unwrap();
     assert_eq!(reread.runs[0].status, "completed");
     assert_eq!(reread.stage, "complete");
+}
+
+// ==================== GH#283: kickoff --base <ref> ====================
+
+/// Initialize a bare git repo in a temp dir with an initial commit on `main`
+/// and return the repo root path.
+///
+/// `create_worktree` shells out to real git, so these tests need an actual
+/// repository with a resolvable HEAD.
+fn base_ref_test_repo() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+
+    let init = std::process::Command::new("git")
+        .current_dir(root)
+        .args(["init", "-b", "main"])
+        .output()
+        .expect("git init failed");
+    assert!(
+        init.status.success(),
+        "git init failed: {}",
+        String::from_utf8_lossy(&init.stderr)
+    );
+
+    let cfg_name = std::process::Command::new("git")
+        .current_dir(root)
+        .args(["config", "user.name", "Test"])
+        .output()
+        .expect("git config user.name failed");
+    assert!(cfg_name.status.success());
+    let cfg_email = std::process::Command::new("git")
+        .current_dir(root)
+        .args(["config", "user.email", "test@test"])
+        .output()
+        .expect("git config user.email failed");
+    assert!(cfg_email.status.success());
+
+    std::fs::write(root.join("README.md"), "# base-ref-test\n").unwrap();
+    let add = std::process::Command::new("git")
+        .current_dir(root)
+        .args(["add", "README.md"])
+        .output()
+        .expect("git add failed");
+    assert!(add.status.success());
+    let commit = std::process::Command::new("git")
+        .current_dir(root)
+        .args(["commit", "-m", "initial", "--no-gpg-sign"])
+        .output()
+        .expect("git commit failed");
+    assert!(
+        commit.status.success(),
+        "git commit failed: {}",
+        String::from_utf8_lossy(&commit.stderr)
+    );
+
+    dir
+}
+
+/// Create a branch at the current HEAD of the test repo.
+fn create_test_branch(root: &std::path::Path, branch: &str) {
+    let output = std::process::Command::new("git")
+        .current_dir(root)
+        .args(["branch", branch])
+        .output()
+        .expect("git branch failed");
+    assert!(
+        output.status.success(),
+        "git branch failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+/// Assert `git merge-base --is-ancestor <ancestor> <descendant>` succeeds.
+fn assert_is_ancestor(root: &std::path::Path, ancestor: &str, descendant: &str) {
+    let output = std::process::Command::new("git")
+        .current_dir(root)
+        .args(["merge-base", "--is-ancestor", ancestor, descendant])
+        .output()
+        .expect("git merge-base --is-ancestor failed");
+    assert!(
+        output.status.success(),
+        "expected '{ancestor}' to be an ancestor of '{descendant}'"
+    );
+}
+
+#[test]
+fn test_create_worktree_with_base_branch_points_at_base() {
+    let dir = base_ref_test_repo();
+    let root = dir.path();
+
+    // Create a parent feature branch representing prior phase work.
+    create_test_branch(root, "feature/parent-phase");
+
+    // Branch the new worktree FROM the parent feature branch.
+    let (worktree_dir, branch_name) =
+        create_worktree(root, "child-slug", Some("feature/parent-phase")).unwrap();
+
+    assert_eq!(branch_name, "feature/child-slug");
+    assert!(worktree_dir.exists(), "worktree dir should exist");
+
+    // The new branch's point is the requested base ref — parent work is
+    // present in the worktree without any merge.
+    assert_is_ancestor(root, "feature/parent-phase", "feature/child-slug");
+    // And the branch point equals the base ref exactly (not just "contains").
+    let base_sha = String::from_utf8_lossy(
+        &std::process::Command::new("git")
+            .current_dir(root)
+            .args(["rev-parse", "feature/parent-phase"])
+            .output()
+            .unwrap()
+            .stdout,
+    )
+    .trim()
+    .to_string();
+    let child_sha = String::from_utf8_lossy(
+        &std::process::Command::new("git")
+            .current_dir(root)
+            .args(["rev-parse", "feature/child-slug"])
+            .output()
+            .unwrap()
+            .stdout,
+    )
+    .trim()
+    .to_string();
+    assert_eq!(base_sha, child_sha, "branch point must equal the base ref");
+}
+
+#[test]
+fn test_create_worktree_without_base_points_at_head() {
+    let dir = base_ref_test_repo();
+    let root = dir.path();
+
+    let (_, branch_name) = create_worktree(root, "no-base-slug", None).unwrap();
+
+    // Default base is HEAD (main for a fresh repo) — unchanged behavior.
+    assert_is_ancestor(root, "main", &branch_name);
+    let main_sha = String::from_utf8_lossy(
+        &std::process::Command::new("git")
+            .current_dir(root)
+            .args(["rev-parse", "main"])
+            .output()
+            .unwrap()
+            .stdout,
+    )
+    .trim()
+    .to_string();
+    let child_sha = String::from_utf8_lossy(
+        &std::process::Command::new("git")
+            .current_dir(root)
+            .args(["rev-parse", &branch_name])
+            .output()
+            .unwrap()
+            .stdout,
+    )
+    .trim()
+    .to_string();
+    assert_eq!(main_sha, child_sha);
+}
+
+#[test]
+fn test_create_worktree_nonexistent_base_fails_cleanly() {
+    let dir = base_ref_test_repo();
+    let root = dir.path();
+
+    let err = create_worktree(root, "bad-base-slug", Some("feature/does-not-exist")).unwrap_err();
+    let msg = err.to_string();
+
+    assert!(
+        msg.contains("feature/does-not-exist"),
+        "error should name the missing ref: {msg}"
+    );
+    assert!(
+        msg.contains("does not exist"),
+        "error should say the ref does not exist: {msg}"
+    );
+    // The error should list valid refs (the existing-branch-style error).
+    assert!(
+        msg.contains("main") || msg.contains("Valid refs"),
+        "error should list valid refs: {msg}"
+    );
+
+    // No worktree must have been created.
+    assert!(
+        !root.join(".worktrees").join("bad-base-slug").exists(),
+        "no worktree should be created when the base ref is invalid"
+    );
+}
+
+#[test]
+fn test_create_worktree_self_base_rejected() {
+    let dir = base_ref_test_repo();
+    let root = dir.path();
+
+    // --base == the auto-generated feature branch is a self-base and must be
+    // rejected before any worktree/branch is created.
+    let err = create_worktree(root, "self-slug", Some("feature/self-slug")).unwrap_err();
+    let msg = err.to_string();
+
+    assert!(
+        msg.contains("feature/self-slug"),
+        "error should name the self-base branch: {msg}"
+    );
+    assert!(
+        !root.join(".worktrees").join("self-slug").exists(),
+        "no worktree should be created for a self-base"
+    );
+}
+
+#[test]
+fn test_build_prompt_with_base_states_base_branch() {
+    let conventions = ProjectConventions {
+        test_command: None,
+        lint_commands: vec![],
+        allowed_tools: vec![],
+    };
+    let opts = KickoffOpts {
+        description: "phase two of parent work",
+        issue: None,
+        container: ContainerMode::None,
+        verify: VerifyLevel::Local,
+        model: "opus",
+        image: "",
+        timeout: Duration::from_secs(3600),
+        dry_run: false,
+        branch: None,
+        base: Some("feature/parent-phase"),
+        quiet: false,
+        design_doc: None,
+        doc_path: None,
+        skip_permissions: false,
+        permission_mode: None,
+        agent_binary: "claude".to_string(),
+        agent_type: None,
+    };
+    let prompt = build_prompt(&opts, 1, "feature/child-phase", &conventions);
+
+    // The brief must state the branch point so the agent knows parent work
+    // is present — no merge needed (GH#283).
+    assert!(
+        prompt.contains("feature/parent-phase"),
+        "prompt should mention the base branch: {prompt}"
+    );
+    assert!(
+        prompt.contains("no merge needed"),
+        "prompt should say no merge is needed: {prompt}"
+    );
+}
+
+#[test]
+fn test_build_prompt_without_base_has_no_base_stanza() {
+    let conventions = ProjectConventions {
+        test_command: None,
+        lint_commands: vec![],
+        allowed_tools: vec![],
+    };
+    let opts = KickoffOpts {
+        description: "standalone feature",
+        issue: None,
+        container: ContainerMode::None,
+        verify: VerifyLevel::Local,
+        model: "opus",
+        image: "",
+        timeout: Duration::from_secs(3600),
+        dry_run: false,
+        branch: None,
+        base: None,
+        quiet: false,
+        design_doc: None,
+        doc_path: None,
+        skip_permissions: false,
+        permission_mode: None,
+        agent_binary: "claude".to_string(),
+        agent_type: None,
+    };
+    let prompt = build_prompt(&opts, 1, "feature/standalone", &conventions);
+
+    assert!(
+        !prompt.contains("no merge needed"),
+        "prompt without --base must not claim parent work is present: {prompt}"
+    );
 }

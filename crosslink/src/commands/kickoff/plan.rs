@@ -173,7 +173,7 @@ pub fn plan(crosslink_dir: &Path, db: &Database, opts: &PlanOpts) -> Result<()> 
     };
 
     // 3. Create worktree
-    let (worktree_dir, branch_name) = create_worktree(&root, &slug, None)?;
+    let (worktree_dir, branch_name) = create_worktree(&root, &slug, opts.base)?;
 
     // Write slug sentinel so other commands can identify this worktree
     std::fs::write(worktree_dir.join(".kickoff-slug"), &slug)
@@ -208,6 +208,9 @@ pub fn plan(crosslink_dir: &Path, db: &Database, opts: &PlanOpts) -> Result<()> 
         println!("---");
         println!("Worktree: {}", worktree_dir.display());
         println!("Branch:   {branch_name}");
+        if let Some(base) = opts.base {
+            println!("Base:     {base}");
+        }
         println!("Agent:    {agent_id}");
         return Ok(());
     }

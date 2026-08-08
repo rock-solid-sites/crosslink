@@ -61,6 +61,7 @@ pub fn dispatch(
             timeout,
             dry_run,
             branch,
+            base,
             doc,
             skip_permissions,
             permission_mode,
@@ -87,6 +88,7 @@ pub fn dispatch(
                 timeout: parse_duration(&timeout)?,
                 dry_run,
                 branch: branch.as_deref(),
+                base: base.as_deref(),
                 quiet,
                 design_doc: parsed_doc.as_ref(),
                 doc_path: doc.as_ref().map(|p| p.to_str().unwrap_or("unknown")),
@@ -112,6 +114,7 @@ pub fn dispatch(
             issue,
             model,
             timeout,
+            base,
             dry_run,
         } => {
             let content = std::fs::read_to_string(&doc)
@@ -127,6 +130,7 @@ pub fn dispatch(
                 timeout: parse_duration(&timeout)?,
                 dry_run,
                 issue,
+                base: base.as_deref(),
                 quiet,
                 agent_binary: crate::utils::read_agent_binary(crosslink_dir),
             };
@@ -238,6 +242,7 @@ fn dispatch_launch(
             timeout: parse_duration(timeout)?,
             dry_run,
             issue,
+            base: None,
             quiet,
             agent_binary: crate::utils::read_agent_binary(crosslink_dir),
         };
@@ -277,6 +282,7 @@ fn dispatch_launch(
             timeout: parse_duration(timeout)?,
             dry_run,
             branch: None,
+            base: None,
             quiet,
             design_doc: parsed_doc.as_ref(),
             doc_path: doc.as_ref().map(|p| p.to_str().unwrap_or("unknown")),
@@ -326,6 +332,7 @@ fn dispatch_launch(
                 timeout: parse_duration(&config.timeout)?,
                 dry_run: false,
                 issue,
+                base: None,
                 quiet,
                 agent_binary: crate::utils::read_agent_binary(crosslink_dir),
             };
@@ -362,6 +369,7 @@ fn dispatch_launch(
                 timeout: parse_duration(&config.timeout)?,
                 dry_run: false,
                 branch: None,
+                base: None,
                 quiet,
                 design_doc: parsed_doc.as_ref(),
                 doc_path: doc_path_str.as_deref(),

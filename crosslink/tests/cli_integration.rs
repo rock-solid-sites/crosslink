@@ -2953,6 +2953,275 @@ fn test_kickoff_dry_run_does_not_launch_agent() {
     assert!(!stdout.contains("Approve trust"));
 }
 
+// ==================== Kickoff --base (GH#283) ====================
+
+/// Create a parent feature branch with a distinct commit, so a `--base`
+/// child worktree can be verified to branch from it (not from main).
+fn create_parent_feature_branch(dir: &std::path::Path, branch: &str) {
+    let checkout = Command::new("git")
+        .current_dir(dir)
+        .args(["checkout", "-b", branch])
+        .output()
+        .expect("git checkout -b failed");
+    assert!(checkout.status.success(), "git checkout -b failed");
+
+    std::fs::write(dir.join("parent-work.txt"), "parent phase work\n").unwrap();
+    let add = Command::new("git")
+        .current_dir(dir)
+        .args(["add", "parent-work.txt"])
+        .output()
+        .expect("git add failed");
+    assert!(add.status.success());
+    let commit = Command::new("git")
+        .current_dir(dir)
+        .args(["commit", "-m", "parent phase work", "--no-gpg-sign"])
+        .output()
+        .expect("git commit failed");
+    assert!(
+        commit.status.success(),
+        "git commit failed: {}",
+        String::from_utf8_lossy(&commit.stderr)
+    );
+}
+
+#[test]
+fn test_kickoff_base_dry_run_prints_base() {
+    let dir = test_dir();
+    init_git_and_crosslink(dir.path());
+    create_parent_feature_branch(dir.path(), "feature/parent-phase");
+
+    let (success, stdout, stderr) = run_crosslink_isolated_home(
+        dir.path(),
+        &[
+            "kickoff",
+            "run",
+            "--dry-run",
+            "--base",
+            "feature/parent-phase",
+            "phase two work",
+        ],
+    );
+
+    assert!(success, "kickoff --base dry-run failed: stderr={stderr}");
+
+    // Dry-run summary must print the resolved base ref.
+    assert!(
+        stdout.contains("Base:     feature/parent-phase")
+            || stdout.contains("Base: feature/parent-phase"),
+        "dry-run should print the base ref: {stdout}"
+    );
+
+    // The KICKOFF.md brief must state the branch point (parent work present).
+    let worktree_line = stdout
+        .lines()
+        .find(|l| l.starts_with("Worktree:"))
+        .expect("No Worktree line in output");
+    let worktree_path = worktree_line.trim_start_matches("Worktree:").trim();
+    let kickoff_path = std::path::Path::new(worktree_path).join("KICKOFF.md");
+    let content = std::fs::read_to_string(&kickoff_path).unwrap();
+    assert!(
+        content.contains("feature/parent-phase"),
+        "KICKOFF.md should state the base branch: {content}"
+    );
+    assert!(
+        content.contains("no merge needed"),
+        "KICKOFF.md should say parent work is present: {content}"
+    );
+}
+
+#[test]
+fn test_kickoff_base_worktree_branches_from_base_ref() {
+    let dir = test_dir();
+    init_git_and_crosslink(dir.path());
+    create_parent_feature_branch(dir.path(), "feature/parent-phase");
+
+    let (success, stdout, stderr) = run_crosslink_isolated_home(
+        dir.path(),
+        &[
+            "kickoff",
+            "run",
+            "--dry-run",
+            "--base",
+            "feature/parent-phase",
+            "branch point check",
+        ],
+    );
+    assert!(success, "kickoff --base dry-run failed: stderr={stderr}");
+
+    // Extract the created branch name from the dry-run summary.
+    let branch_line = stdout
+        .lines()
+        .find(|l| l.starts_with("Branch:"))
+        .expect("No Branch line in output");
+    let branch_name = branch_line.trim_start_matches("Branch:").trim();
+
+    // The new branch's point must be the requested base ref — git
+    // merge-base --is-ancestor proves parent work is present without merge.
+    let check = Command::new("git")
+        .current_dir(dir.path())
+        .args([
+            "merge-base",
+            "--is-ancestor",
+            "feature/parent-phase",
+            branch_name,
+        ])
+        .output()
+        .expect("git merge-base --is-ancestor failed");
+    assert!(
+        check.status.success(),
+        "expected 'feature/parent-phase' to be an ancestor of '{branch_name}'"
+    );
+
+    // The branch point equals the base ref exactly (not merely "contains").
+    let base_sha = String::from_utf8_lossy(
+        &Command::new("git")
+            .current_dir(dir.path())
+            .args(["rev-parse", "feature/parent-phase"])
+            .output()
+            .unwrap()
+            .stdout,
+    )
+    .trim()
+    .to_string();
+    let child_sha = String::from_utf8_lossy(
+        &Command::new("git")
+            .current_dir(dir.path())
+            .args(["rev-parse", branch_name])
+            .output()
+            .unwrap()
+            .stdout,
+    )
+    .trim()
+    .to_string();
+    assert_eq!(base_sha, child_sha, "branch point must equal the base ref");
+}
+
+#[test]
+fn test_kickoff_base_nonexistent_ref_fails_cleanly() {
+    let dir = test_dir();
+    init_git_and_crosslink(dir.path());
+
+    let (success, stdout, stderr) = run_crosslink_isolated_home(
+        dir.path(),
+        &[
+            "kickoff",
+            "run",
+            "--dry-run",
+            "--base",
+            "feature/no-such-parent",
+            "failing base check",
+        ],
+    );
+
+    // Must fail cleanly — no worktree created, clear error naming the ref.
+    assert!(!success, "kickoff --base with a missing ref should fail");
+    let combined = format!("{stdout}\n{stderr}");
+    assert!(
+        combined.contains("feature/no-such-parent"),
+        "error should name the missing ref: {combined}"
+    );
+    assert!(
+        combined.contains("does not exist"),
+        "error should say the ref does not exist: {combined}"
+    );
+
+    // No worktree should have been created.
+    let wt_dir = dir.path().join(".worktrees");
+    if wt_dir.exists() {
+        let entries: Vec<_> = std::fs::read_dir(&wt_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .collect();
+        assert!(
+            entries.is_empty(),
+            "no worktree should be created for a missing base ref"
+        );
+    }
+}
+
+#[test]
+fn test_kickoff_base_self_base_rejected() {
+    let dir = test_dir();
+    init_git_and_crosslink(dir.path());
+
+    // --base equal to the auto-generated feature branch name is a self-base.
+    // Use --branch so the branch name is deterministic: feature/self-check.
+    let (success, _, stderr) = run_crosslink_isolated_home(
+        dir.path(),
+        &[
+            "kickoff",
+            "run",
+            "--dry-run",
+            "--branch",
+            "feature/self-check",
+            "--base",
+            "feature/self-check",
+            "self base check",
+        ],
+    );
+
+    assert!(!success, "self-base should be rejected");
+    assert!(
+        stderr.contains("itself") || stderr.contains("self-base"),
+        "error should explain the self-base rejection: {stderr}"
+    );
+}
+
+#[test]
+fn test_kickoff_existing_branch_path_unchanged() {
+    let dir = test_dir();
+    init_git_and_crosslink(dir.path());
+
+    // --branch with a branch that does not exist yet: kickoff creates the
+    // worktree + branch from HEAD (default base) — the pre-existing path,
+    // unchanged by --base support (GH#283).
+    let (success, stdout, stderr) = run_crosslink_isolated_home(
+        dir.path(),
+        &[
+            "kickoff",
+            "run",
+            "--dry-run",
+            "--branch",
+            "feature/new-work",
+            "existing branch path",
+        ],
+    );
+
+    assert!(success, "existing --branch path failed: stderr={stderr}");
+    assert!(
+        stdout.contains("feature/new-work"),
+        "dry-run should report the branch: {stdout}"
+    );
+    // No --base was passed: the branch is created from HEAD (main) and the
+    // dry-run summary carries no Base line.
+    assert!(
+        !stdout.contains("Base:"),
+        "no --base → dry-run must not print a Base line: {stdout}"
+    );
+    // The created branch points at main (HEAD), proving default behavior.
+    let main_sha = String::from_utf8_lossy(
+        &Command::new("git")
+            .current_dir(dir.path())
+            .args(["rev-parse", "main"])
+            .output()
+            .unwrap()
+            .stdout,
+    )
+    .trim()
+    .to_string();
+    let branch_sha = String::from_utf8_lossy(
+        &Command::new("git")
+            .current_dir(dir.path())
+            .args(["rev-parse", "feature/new-work"])
+            .output()
+            .unwrap()
+            .stdout,
+    )
+    .trim()
+    .to_string();
+    assert_eq!(main_sha, branch_sha, "default branch point must be main");
+}
+
 // ==================== Tier 2 Smoke Tests (GH issue #242) ====================
 
 #[test]

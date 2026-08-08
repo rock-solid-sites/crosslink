@@ -483,6 +483,36 @@ pub(super) fn create_worktree(
     // Determine base ref
     let base = base_branch.unwrap_or("HEAD");
 
+    // Validate the requested base ref BEFORE creating the worktree (GH#283).
+    // A phase-on-phase kickoff branches from a parent feature branch; if the
+    // ref is missing the worktree would silently branch from HEAD and the
+    // agent would re-create parent work (duplicate-base conflicts). Fail
+    // loudly instead.
+    if let Some(requested) = base_branch {
+        // Reject the auto-generated feature branch as its own base (self-base).
+        if requested == branch_name {
+            bail!(
+                "Refusing to branch '{}' from itself: --base '{requested}' equals the \
+                 auto-generated feature branch. Pick a different base (e.g. main or the \
+                 parent feature branch).",
+                branch_name
+            );
+        }
+
+        let verify = Command::new("git")
+            .current_dir(repo_root)
+            .args(["rev-parse", "--verify", "--quiet", requested])
+            .output()
+            .context("Failed to verify base ref")?;
+        if !verify.status.success() {
+            let refs = list_valid_refs(repo_root);
+            bail!(
+                "Base ref '{requested}' does not exist. \
+                 Branch the worktree from an existing ref.\nValid refs:\n{refs}"
+            );
+        }
+    }
+
     // Handle existing branch refs from prior phases (#481).
     // A branch may exist from a previous kickoff/swarm phase that was
     // already merged. Rather than failing, clean it up automatically.
@@ -561,6 +591,35 @@ pub(super) fn create_worktree(
     }
 
     Ok((worktree_dir, branch_name))
+}
+
+/// List valid local branch refs for a helpful error message when `--base`
+/// points at a ref that does not exist (GH#283).
+///
+/// Uses `git for-each-ref` restricted to local heads. Best effort: any git
+/// failure yields a generic message rather than an error.
+fn list_valid_refs(repo_root: &Path) -> String {
+    let output = Command::new("git")
+        .current_dir(repo_root)
+        .args(["for-each-ref", "--format=%(refname:short)", "refs/heads"])
+        .output();
+    let Ok(output) = output else {
+        return "  (could not list refs)".to_string();
+    };
+    if !output.status.success() {
+        return "  (could not list refs)".to_string();
+    }
+    let refs = String::from_utf8_lossy(&output.stdout);
+    let trimmed = refs.trim();
+    if trimmed.is_empty() {
+        "  (no local branches)".to_string()
+    } else {
+        trimmed
+            .lines()
+            .map(|l| format!("  {l}"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
 }
 
 /// Ensure the worktree has the heartbeat hook — and its shared-config

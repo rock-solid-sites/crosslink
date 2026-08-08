@@ -751,6 +751,7 @@ pub fn launch(
             timeout: std::time::Duration::from_secs(3600),
             dry_run: false,
             branch: branch.as_deref(),
+            base: None,
             quiet,
             design_doc: None,
             doc_path: None,

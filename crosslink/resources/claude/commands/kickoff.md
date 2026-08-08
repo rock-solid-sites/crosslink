@@ -27,6 +27,7 @@ The user may pass these flags after the feature description:
 - `--container <runtime>`: Use `docker` or `podman` instead of local tmux. Default: `none`.
 - `--model <model>`: LLM model to use (provider/model format, e.g. `opencode-go/deepseek-v4-flash`, `google-vertex/gemini-3.1-pro-preview`). Default: from `hook-config.json` or `opus`.
 - `--timeout <duration>`: Expected task duration (guide, e.g. `1h`, `30m`). The agent is NOT killed at this time — the value is recorded and displayed; a generous backstop (`max(timeout*24, 24h)`) only guards against a wedged process (ASES #192). Default: `1h`.
+- `--base <ref>`: Branch the new worktree from an arbitrary git ref (defaults to `HEAD`/main). Use a parent feature branch for phase-on-phase work so the agent starts with parent work already present — no `git merge` needed (GH#283). The ref is verified before the worktree is created.
 - All other text is the feature description.
 
 **Parsing**: Split ARGUMENTS on whitespace. Extract recognized `--flag value` pairs. Everything remaining is the feature description.
@@ -45,7 +46,7 @@ crosslink kickoff run "<feature description>" \
   --timeout <duration>
 ```
 
-Add `--issue <id>` if the user specified one. Add `--dry-run` if the user asked for a dry run.
+Add `--issue <id>` if the user specified one. Add `--dry-run` if the user asked for a dry run. Add `--base <ref>` if the user named a parent branch to branch from (e.g. a previous phase's feature branch).
 
 3. **Run the command**: Execute `crosslink kickoff run` with all flags. The CLI handles:
    - Creating the feature branch and worktree

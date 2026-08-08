@@ -1683,6 +1683,13 @@ enum KickoffCommands {
         /// Branch to use (auto-creates feature branch if omitted)
         #[arg(long)]
         branch: Option<String>,
+        /// Ref to branch the new worktree from (e.g. a parent feature
+        /// branch). Defaults to HEAD. The ref is verified before the
+        /// worktree is created; the KICKOFF.md brief states the branch
+        /// point so the agent knows parent work is present — no merge
+        /// needed (GH#283).
+        #[arg(long)]
+        base: Option<String>,
         /// Path to a design document (markdown) with structured requirements
         #[arg(long, value_name = "PATH")]
         doc: Option<PathBuf>,
@@ -1758,6 +1765,10 @@ enum KickoffCommands {
 /// process (ASES #192).
         #[arg(long, default_value = "30m")]
         timeout: String,
+        /// Ref to branch the plan worktree from (mirrors `kickoff run --base`).
+        /// Defaults to HEAD (GH#283).
+        #[arg(long)]
+        base: Option<String>,
         /// Print the analysis prompt without launching
         #[arg(long = "dry-run")]
         dry_run: bool,

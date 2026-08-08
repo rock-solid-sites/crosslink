@@ -91,10 +91,10 @@ pub fn run(
         if worktree_dir.exists() {
             (worktree_dir, br.to_string())
         } else {
-            create_worktree(&root, wt_slug, None)?
+            create_worktree(&root, wt_slug, opts.base)?
         }
     } else {
-        create_worktree(&root, &compact_name, None)?
+        create_worktree(&root, &compact_name, opts.base)?
     };
 
     // Write slug sentinel so other commands can identify this worktree
@@ -169,6 +169,9 @@ pub fn run(
         println!("---");
         println!("Worktree: {}", worktree_dir.display());
         println!("Branch:   {branch_name}");
+        if let Some(base) = opts.base {
+            println!("Base:     {base}");
+        }
         println!("Agent:    {compact_name}");
         return Ok(compact_name);
     }

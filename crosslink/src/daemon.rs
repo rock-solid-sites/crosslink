@@ -9,19 +9,9 @@ use std::thread;
 use std::time::Duration;
 
 use crate::db::Database;
-use crate::hydration::{hydrate_v2_safely, V2HydrateOutcome};
+use crate::hydration::{tick_hydrate, TickHydrateOutcome};
 
 const FLUSH_INTERVAL_SECS: u64 = 30;
-
-/// Hydrate `SQLite` from the reduced v3 [`crate::checkpoint::CheckpointState`] for
-/// a daemon tick. Reduces the current v3 ref namespace and maps it into `SQLite`
-/// via `hydrate_from_state`, returning the same `HydrationStats` shape the v2
-/// `hydrate_to_sqlite` returns so the tick's reporting is uniform.
-fn hydrate_v3_tick(cache_dir: &Path, db: &Database) -> Result<crate::hydration::HydrationStats> {
-    let source = crate::hub_source::RefHubSource::new(cache_dir)?;
-    let outcome = crate::compaction::reduce(&source)?;
-    crate::hydration::hydrate_from_state(&outcome.state, db)
-}
 
 pub fn start(crosslink_dir: &Path) -> Result<()> {
     let pid_file = crosslink_dir.join("daemon.pid");
@@ -274,39 +264,19 @@ pub fn run_daemon(crosslink_dir: &Path) -> Result<()> {
                                         // v3 fetch already adopted refs +
                                         // compacted); V2 routes through the
                                         // SYSTEM-WIDE fail-closed dispatcher
-                                        // (gh#125 r2) — the destructive v2 file
-                                        // path runs only when the authoritative
-                                        // decision (local refs + remote) is
-                                        // confidently-v2-only.
-                                        let hydrate_result = if sync.hub_mode().is_v3() {
-                                            hydrate_v3_tick(sync.cache_path(), &db).map(Some)
-                                        } else {
-                                            // NB: do NOT `?` the dispatcher here —
-                                            // the tick must warn-and-continue on
-                                            // hydration errors, not abort the
-                                            // daemon loop (original semantics).
-                                            match hydrate_v2_safely(
-                                                crosslink_dir,
-                                                sync.cache_path(),
-                                                &db,
-                                            ) {
-                                                Ok(V2HydrateOutcome::Hydrated(stats)) => {
-                                                    Ok(Some(stats))
-                                                }
-                                                Ok(V2HydrateOutcome::Skipped { reason }) => {
-                                                    tracing::warn!(
-                                                        "daemon: v2 hydration skipped \
-                                                         fail-closed (gh#125): {reason}; \
-                                                         SQLite is stale-but-safe — run \
-                                                         `crosslink sync` to recover"
-                                                    );
-                                                    Ok(None)
-                                                }
-                                                Err(e) => Err(e),
-                                            }
-                                        };
-                                        match hydrate_result {
-                                            Ok(Some(stats)) => {
+                                        // (gh#125 r2). tick_hydrate implements the
+                                        // warn-and-continue contract (gh#125 r3 R2):
+                                        // a dispatcher Err or fail-closed skip is
+                                        // warned internally and resolved to an
+                                        // outcome — it is NEVER propagated, so the
+                                        // daemon loop always continues.
+                                        match tick_hydrate(
+                                            crosslink_dir,
+                                            sync.cache_path(),
+                                            &db,
+                                            sync.hub_mode().is_v3(),
+                                        ) {
+                                            TickHydrateOutcome::Hydrated(stats) => {
                                                 crate::hydration::record_hydrated_ref(
                                                     crosslink_dir,
                                                 );
@@ -318,10 +288,8 @@ pub fn run_daemon(crosslink_dir: &Path) -> Result<()> {
                                                     );
                                                 }
                                             }
-                                            Ok(None) => {}
-                                            Err(e) => {
-                                                tracing::warn!("Hydration failed: {}", e)
-                                            }
+                                            TickHydrateOutcome::Skipped { .. }
+                                            | TickHydrateOutcome::Failed { .. } => {}
                                         }
                                     }
                                 }

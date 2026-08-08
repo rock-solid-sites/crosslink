@@ -834,9 +834,40 @@ pub(crate) fn v2_file_path_decision(repo_dir: &Path, remote: &str) -> V2FilePath
     // fail closed (REQ-9 style: the version of an unverifiable remote is never
     // guessed).
     if !remote_configured(repo_dir, remote) {
-        // No remote configured — a local-only hub cannot hide a remote v3. The
-        // local v2-only conclusion stands.
-        return V2FilePathDecision::Allowed;
+        // The named tracker remote is absent. Pre-r3 this returned Allowed on
+        // the assumption "no remote configured => local-only hub", but that
+        // fail-opens when hook-config names a GHOST remote while OTHER remotes
+        // exist (audit SC#1, gh#125 r3): a repo whose real origin hosts v3
+        // would silently run the destructive v2 file path.
+        //
+        // Enumerate ALL remotes and fail closed unless the enumeration
+        // CONFIRMS zero remotes (R1): `list_git_remotes` returns an empty vec
+        // on git failure (soft signal), so "Allowed only on zero remotes"
+        // implemented against that would re-introduce the fail-open on
+        // enumeration failure. The Result-returning variant distinguishes
+        // empty-success from empty-failure; only a confirmed empty-success may
+        // Allowed. Any real remote is unverifiable remote state -> skip.
+        let remotes = match crate::sync::list_git_remotes_result(repo_dir) {
+            Ok(remotes) => remotes,
+            Err(e) => {
+                return V2FilePathDecision::forbidden(format!(
+                    "cannot enumerate git remotes (detection doubt): {e}; refusing to run \
+                     the v2 file path when remote state is unverifiable"
+                ))
+            }
+        };
+        if remotes.is_empty() {
+            // Confirmed zero remotes — a local-only hub cannot hide a remote
+            // v3. The local v2-only conclusion stands.
+            return V2FilePathDecision::Allowed;
+        }
+        return V2FilePathDecision::forbidden(format!(
+            "tracker remote '{remote}' is not configured while {} remote(s) exist ({}) — \
+             the remote hub version cannot be verified, so the v2 file path is refused \
+             (fail-closed, gh#125 r3)",
+            remotes.len(),
+            remotes.join(", ")
+        ));
     }
     match detect_remote_hub_version(repo_dir, remote) {
         Ok(HubVersion::V3 { .. }) => V2FilePathDecision::forbidden(format!(
@@ -4706,6 +4737,77 @@ mod tests {
         assert!(
             decision.is_allowed(),
             "v2-only local hub with no remote must be allowed; got {decision:?}"
+        );
+    }
+
+    #[test]
+    fn v2_file_path_decision_ghost_remote_zero_remotes_allowed() {
+        // gh#125 r3 R1: the named tracker remote is absent AND a confirmed
+        // enumeration of ZERO remotes (empty-success, not empty-failure) —
+        // a local-only hub cannot hide a remote v3, Allowed stands.
+        let dir = v2_only_local();
+        let decision = v2_file_path_decision(dir.path(), "ghost");
+        assert!(
+            decision.is_allowed(),
+            "ghost tracker remote with confirmed zero remotes must be allowed; got {decision:?}"
+        );
+    }
+
+    #[test]
+    fn v2_file_path_decision_ghost_remote_other_remotes_forbidden() {
+        // gh#125 r3 R1 (audit SC#1 regression): hook-config names a GHOST
+        // tracker remote while OTHER remotes exist. Pre-r3 fail-opened
+        // (remote_configured=false -> Allowed without consulting the real
+        // remote); r3 must enumerate and fail closed — the real origin could
+        // host v3, so the destructive v2 path must not run.
+        let remote_dir = tempfile::tempdir().unwrap();
+        run_git(remote_dir.path(), &["init", "--bare"]);
+        let dir = v2_only_local();
+        run_git(
+            dir.path(),
+            &[
+                "remote",
+                "add",
+                "origin",
+                remote_dir.path().to_str().unwrap(),
+            ],
+        );
+        run_git(dir.path(), &["push", "origin", "crosslink/hub"]);
+        let decision = v2_file_path_decision(dir.path(), "ghost");
+        assert!(
+            !decision.is_allowed(),
+            "ghost tracker remote with other remotes present must forbid the v2 file path; \
+             got {decision:?}"
+        );
+    }
+
+    #[test]
+    fn v2_file_path_decision_ghost_remote_other_v3_remote_forbidden() {
+        // gh#125 r3 R1 variant: the OTHER remote advertises v3 markers — the
+        // strongest reason to fail closed when the named remote is absent.
+        let remote_dir = tempfile::tempdir().unwrap();
+        run_git(remote_dir.path(), &["init", "--bare"]);
+        let dir = v2_only_local();
+        run_git(
+            dir.path(),
+            &[
+                "remote",
+                "add",
+                "origin",
+                remote_dir.path().to_str().unwrap(),
+            ],
+        );
+        run_git(dir.path(), &["push", "origin", "crosslink/hub"]);
+        for r in [META_REF, CHECKPOINT_REF] {
+            run_git(dir.path(), &["update-ref", r, "HEAD"]);
+            run_git(dir.path(), &["push", "origin", r]);
+            run_git(dir.path(), &["update-ref", "-d", r]);
+        }
+        let decision = v2_file_path_decision(dir.path(), "ghost");
+        assert!(
+            !decision.is_allowed(),
+            "ghost tracker remote with a v3 origin must forbid the v2 file path; \
+             got {decision:?}"
         );
     }
 

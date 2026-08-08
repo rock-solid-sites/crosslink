@@ -9,6 +9,7 @@ mod trust;
 #[cfg(test)]
 mod tests;
 
+use anyhow::Result;
 use std::path::Path;
 use std::process::Command;
 use std::sync::Once;
@@ -111,20 +112,24 @@ pub fn read_tracker_remote(crosslink_dir: &Path) -> String {
 
 /// List the names of git remotes configured for `repo_path`, alphabetically.
 ///
-/// Returns an empty vec when the directory isn't a git repo or `git remote`
-/// fails for any other reason — the caller treats "no remotes" as a soft
-/// signal, not a hard error. Sort is deterministic so callers picking
-/// "first alphabetical" get repeatable behaviour across machines.
-fn list_git_remotes(repo_path: &Path) -> Vec<String> {
+/// Returns an error when the directory isn't a git repo or `git remote`
+/// fails for any other reason. The caller that needs to distinguish
+/// "confirmed zero remotes" from "enumeration failed" must use this
+/// Result-returning variant (gh#125 r3 R1): a soft-signal empty vec would
+/// otherwise re-introduce a fail-open when the v2 file-path gate consults
+/// remote state. Sort is deterministic so callers picking "first
+/// alphabetical" get repeatable behaviour across machines.
+pub(crate) fn list_git_remotes_result(repo_path: &Path) -> Result<Vec<String>> {
     let output = Command::new("git")
         .current_dir(repo_path)
         .args(["remote"])
-        .output();
-    let Ok(output) = output else {
-        return Vec::new();
-    };
+        .output()?;
     if !output.status.success() {
-        return Vec::new();
+        anyhow::bail!(
+            "`git remote` failed in {}: {}",
+            repo_path.display(),
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
     }
     let mut remotes: Vec<String> = String::from_utf8_lossy(&output.stdout)
         .lines()
@@ -133,7 +138,17 @@ fn list_git_remotes(repo_path: &Path) -> Vec<String> {
         .map(str::to_string)
         .collect();
     remotes.sort();
-    remotes
+    Ok(remotes)
+}
+
+/// List the names of git remotes configured for `repo_path`, alphabetically.
+///
+/// Returns an empty vec when the directory isn't a git repo or `git remote`
+/// fails for any other reason — the caller treats "no remotes" as a soft
+/// signal, not a hard error. Prefer [`list_git_remotes_result`] when the
+/// empty-success vs empty-failure distinction matters (gh#125 r3 R1).
+fn list_git_remotes(repo_path: &Path) -> Vec<String> {
+    list_git_remotes_result(repo_path).unwrap_or_default()
 }
 
 /// Infer the tracker remote name from the project's git remotes when

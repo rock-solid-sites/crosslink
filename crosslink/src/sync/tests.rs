@@ -292,6 +292,45 @@ fn add_git_remote(repo: &Path, name: &str) {
 }
 
 #[test]
+fn test_list_git_remotes_result_non_repo_err() {
+    // gh#125 r3 R1: enumeration FAILURE must be an Err (empty-success and
+    // empty-failure must be distinguishable) so the v2 file-path gate can
+    // fail closed instead of treating a broken `git remote` as zero remotes.
+    let dir = tempdir().unwrap();
+    let res = list_git_remotes_result(dir.path());
+    assert!(
+        res.is_err(),
+        "enumeration in a non-git directory must error, not return empty; got {res:?}"
+    );
+}
+
+#[test]
+fn test_list_git_remotes_result_zero_remotes_ok() {
+    // Confirmed empty-success: a git repo with no remotes returns Ok(empty),
+    // which is what "Allowed on zero remotes" may rely on.
+    let dir = tempdir().unwrap();
+    init_git_repo(dir.path());
+    let res = list_git_remotes_result(dir.path()).expect("enumeration must succeed");
+    assert!(
+        res.is_empty(),
+        "a git repo with no remotes must enumerate to an empty success; got {res:?}"
+    );
+}
+
+#[test]
+fn test_list_git_remotes_result_remotes_ok_sorted() {
+    // A repo with several remotes returns them alphabetically (deterministic
+    // ordering is part of the contract).
+    let dir = tempdir().unwrap();
+    init_git_repo(dir.path());
+    add_git_remote(dir.path(), "upstream");
+    add_git_remote(dir.path(), "origin");
+    add_git_remote(dir.path(), "backup");
+    let res = list_git_remotes_result(dir.path()).expect("enumeration must succeed");
+    assert_eq!(res, vec!["backup", "origin", "upstream"]);
+}
+
+#[test]
 fn test_read_tracker_remote_single_origin_no_warn() {
     // The single most common project shape: one git remote called "origin",
     // hook-config.json has no `tracker_remote` field. Before GH#611 this

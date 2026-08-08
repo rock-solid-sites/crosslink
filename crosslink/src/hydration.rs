@@ -357,7 +357,7 @@ pub(crate) fn hydrate_v2_safely(
     // Lock acquisition failure (held by a live process >30s) is itself
     // uncertainty — skip fail-closed rather than run the destructive path.
     let lock_path = cache_dir.join(".hub-write-lock");
-    let _lock = match crate::sync::acquire_hub_lock(&lock_path) {
+    let lock = match crate::sync::acquire_hub_lock(&lock_path) {
         Ok(lock) => lock,
         Err(e) => {
             let reason = format!(
@@ -370,7 +370,26 @@ pub(crate) fn hydrate_v2_safely(
             return Ok(V2HydrateOutcome::Skipped { reason });
         }
     };
+    hydrate_v2_safely_locked(crosslink_dir, cache_dir, db, &lock)
+}
 
+/// The fail-closed dispatcher body for a caller that ALREADY holds the hub
+/// write lock (gh#125 r3 R3).
+///
+/// [`hydrate_v2_safely`] acquires the lock itself and then delegates here;
+/// this variant runs the same probe+hydrate sequence under an already-held
+/// lock. It exists for callers that must run the locked re-check + clear +
+/// hydrate as ONE critical section (the integrity repair): `acquire_hub_lock`
+/// is NON-REENTRANT (file-based `create_new` + 30s timeout), so a second
+/// acquire from the same process would wait 30s, error, and skip fail-closed
+/// — making the repair report Fail every time instead of only on a genuine
+/// decision flip.
+pub(crate) fn hydrate_v2_safely_locked(
+    crosslink_dir: &Path,
+    cache_dir: &Path,
+    db: &Database,
+    _lock: &crate::sync::HubWriteLock,
+) -> Result<V2HydrateOutcome> {
     let remote = crate::sync::read_tracker_remote(crosslink_dir);
     match crate::hub_v3::v2_file_path_decision(cache_dir, &remote) {
         crate::hub_v3::V2FilePathDecision::Allowed => {
@@ -384,6 +403,87 @@ pub(crate) fn hydrate_v2_safely(
             Ok(V2HydrateOutcome::Skipped { reason })
         }
     }
+}
+
+/// Outcome of one daemon tick's hydrate step — the observation mechanism for
+/// the tick's warn-and-continue contract (gh#125 r3 R2).
+///
+/// The daemon tick must NEVER abort its loop on a hydration problem (original
+/// semantics, restored by 7c5b3e88). Tests need to observe which arm ran, and
+/// this crate has no tracing-capture harness (and inventing one is out of
+/// scope for gh#125 r3) — so [`tick_hydrate`] returns this enum instead of a
+/// bare `Result<Option<...>>` (which cannot distinguish Skipped from Failed).
+/// Every non-`Hydrated` arm warns internally before returning, matching the
+/// daemon's warn-and-continue behaviour.
+#[derive(Debug)]
+pub(crate) enum TickHydrateOutcome {
+    /// The v3 (reduced-state) or v2 (file-path) hydration ran and produced
+    /// these stats.
+    Hydrated(HydrationStats),
+    /// The fail-closed v2 dispatcher skipped the destructive file path;
+    /// `reason` was already warned.
+    Skipped { reason: String },
+    /// The hydrate attempt errored; `error` was already warned (not
+    /// propagated — the daemon loop must continue).
+    Failed { error: String },
+}
+
+/// Hydrate the local `SQLite` for a daemon tick — the v3/v2 dispatch plus
+/// warn handling extracted from the daemon loop (gh#125 r3 R2).
+///
+/// The v3 branch hydrates from the reduced checkpoint state
+/// ([`hydrate_from_state`]); the v2 branch routes through the SYSTEM-WIDE
+/// fail-closed dispatcher ([`hydrate_v2_safely`]). The caller must NOT
+/// propagate any non-success as an error: the tick's contract is
+/// warn-and-continue, so a hydration problem can never abort the daemon loop.
+pub(crate) fn tick_hydrate(
+    crosslink_dir: &Path,
+    cache_path: &Path,
+    db: &Database,
+    is_v3: bool,
+) -> TickHydrateOutcome {
+    if is_v3 {
+        match hydrate_v3_tick(cache_path, db) {
+            Ok(stats) => TickHydrateOutcome::Hydrated(stats),
+            Err(e) => {
+                tracing::warn!("daemon: v3 hydration failed (warn-and-continue): {e}");
+                TickHydrateOutcome::Failed {
+                    error: format!("{e:#}"),
+                }
+            }
+        }
+    } else {
+        // NB: do NOT `?` the dispatcher here — the tick must warn-and-continue
+        // on hydration errors, not abort the daemon loop (original semantics).
+        match hydrate_v2_safely(crosslink_dir, cache_path, db) {
+            Ok(V2HydrateOutcome::Hydrated(stats)) => TickHydrateOutcome::Hydrated(stats),
+            Ok(V2HydrateOutcome::Skipped { reason }) => {
+                tracing::warn!(
+                    "daemon: v2 hydration skipped fail-closed (gh#125): {reason}; \
+                     SQLite is stale-but-safe — run `crosslink sync` to recover"
+                );
+                TickHydrateOutcome::Skipped { reason }
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "daemon: v2 hydration failed (warn-and-continue, gh#125 r3): {e}"
+                );
+                TickHydrateOutcome::Failed {
+                    error: format!("{e:#}"),
+                }
+            }
+        }
+    }
+}
+
+/// Hydrate `SQLite` from the reduced v3 [`crate::checkpoint::CheckpointState`] for
+/// a daemon tick. Reduces the current v3 ref namespace and maps it into `SQLite`
+/// via `hydrate_from_state`, returning the same `HydrationStats` shape the v2
+/// `hydrate_to_sqlite` returns so the tick's reporting is uniform.
+fn hydrate_v3_tick(cache_dir: &Path, db: &Database) -> Result<HydrationStats> {
+    let source = crate::hub_source::RefHubSource::new(cache_dir)?;
+    let outcome = crate::compaction::reduce(&source)?;
+    hydrate_from_state(&outcome.state, db)
 }
 
 /// Hydrate the local `SQLite` database from a materialized v3
@@ -2752,6 +2852,71 @@ mod tests {
     }
 
     #[test]
+    fn test_marker_written_on_forbidden_skip() {
+        // gh#125 r3 (item 3, audit NIT #3 — G3 marker-write regression test;
+        // the auditor confirmed the behaviour live organically, this pins it
+        // as a unit test): when maybe_auto_hydrate skips the v2 file path
+        // fail-closed, it must STILL write .last-hydrated-ref so the
+        // per-command probe only re-runs when the hub tip actually moves
+        // again (bounds probe overhead to real changes).
+        let (dir, crosslink_dir, cache_dir, _remote_dir) = setup_remote_v3_local_v2_only();
+        let _work = dir.path().join("work");
+
+        // Fixture precondition: the system-wide decision is Forbidden
+        // (remote advertises v3).
+        assert!(
+            !crate::hub_v3::v2_file_path_decision(&cache_dir, "origin").is_allowed(),
+            "fixture precondition: the decision must be Forbidden (remote advertises v3)"
+        );
+
+        let stale = make_issue(999, "stale v2 issue");
+        write_stale_issues(&cache_dir, &[stale]);
+
+        let (db, _tmp) = setup_test_db();
+        let id = db
+            .create_issue_with_author("agent row", None, "medium", Some("agent-7"))
+            .unwrap();
+
+        let marker_path = crosslink_dir.join(LAST_HYDRATED_REF_FILE);
+        assert!(
+            !marker_path.exists(),
+            "precondition: no marker yet — maybe_auto_hydrate must reach the decision"
+        );
+
+        let hydrated = maybe_auto_hydrate(&crosslink_dir, &db).unwrap();
+        assert!(
+            !hydrated,
+            "remote-only v3 markers must skip the v2 path (fail-closed)"
+        );
+
+        // G3: the marker must record the current hub ref on the skip arm.
+        let current_ref = hub_head_ref(&crosslink_dir).expect("hub head ref resolvable");
+        let marker = std::fs::read_to_string(&marker_path).unwrap_or_else(|_| {
+            panic!(
+                "marker {} must be written on the Forbidden skip arm (G3)",
+                marker_path.display()
+            )
+        });
+        assert_eq!(
+            marker.trim(),
+            current_ref,
+            "marker must record the current hub ref when skipping"
+        );
+
+        // The agent-authored row must survive (same fail-closed guarantee).
+        let loaded = db.get_issue(id).unwrap().expect("agent row present");
+        assert_eq!(loaded.title, "agent row", "agent-authored row must survive");
+        assert!(
+            db.get_issue(999).unwrap().is_none(),
+            "stale v2 issue must NOT be imported when the remote is v3"
+        );
+
+        // A second call now short-circuits on the marker match (no re-probe).
+        let again = maybe_auto_hydrate(&crosslink_dir, &db).unwrap();
+        assert!(!again, "marker match must short-circuit a second call");
+    }
+
+    #[test]
     fn test_hydrate_v2_safely_skips_on_v3_hub() {
         // gh#125 r2 — the fail-closed dispatcher used by the TUI startup and
         // periodic-poll sync paths (and the daemon / shared_writer / sync v2
@@ -2811,6 +2976,197 @@ mod tests {
         }
         let loaded = db.get_issue(7).unwrap().expect("v2 issue hydrated");
         assert_eq!(loaded.title, "v2 hub issue");
+    }
+
+    #[test]
+    fn test_tick_hydrate_v2_dispatcher_err_consumed() {
+        // gh#125 r3 R2 — the daemon tick's warn-and-continue contract: when
+        // the v2 dispatcher returns Err, tick_hydrate must CONSUME it (warn +
+        // resolve to Failed) rather than propagate, so the daemon loop can
+        // continue. The outcome enum is the observation mechanism (no
+        // tracing-capture infra exists in this crate).
+        let (_dir, crosslink_dir, cache_dir) = setup_git_env_with_v2_cache();
+        // Force hydrate_to_sqlite's read to error: make `issues` a regular
+        // FILE instead of a directory — read_all_issue_files passes the
+        // exists() check and then read_dir fails (ENOTDIR), which propagates
+        // out of the dispatcher as Err.
+        std::fs::write(cache_dir.join("issues"), "not a directory").unwrap();
+
+        let (db, _tmp) = setup_test_db();
+        let outcome = crate::hydration::tick_hydrate(&crosslink_dir, &cache_dir, &db, false);
+        match &outcome {
+            crate::hydration::TickHydrateOutcome::Failed { error } => {
+                assert!(
+                    !error.is_empty(),
+                    "failed outcome must carry the underlying error"
+                );
+            }
+            other => panic!(
+                "dispatcher Err must be consumed as Failed (warn-and-continue), got {other:?}"
+            ),
+        }
+    }
+
+    #[test]
+    fn test_tick_hydrate_v2_skipped_warns() {
+        // gh#125 r3 R2 — the v2-Skipped arm: on a remote-v3 hub the fail-closed
+        // dispatcher skips; tick_hydrate warns and resolves to Skipped (never
+        // propagates, never hydrates the stale projection).
+        let (dir, crosslink_dir, cache_dir, _remote_dir) = setup_remote_v3_local_v2_only();
+        let _work = dir.path().join("work");
+
+        let stale = make_issue(999, "stale v2 issue");
+        write_stale_issues(&cache_dir, &[stale]);
+
+        let (db, _tmp) = setup_test_db();
+        let id = db
+            .create_issue_with_author("agent row", None, "medium", Some("agent-7"))
+            .unwrap();
+
+        let outcome = crate::hydration::tick_hydrate(&crosslink_dir, &cache_dir, &db, false);
+        match &outcome {
+            crate::hydration::TickHydrateOutcome::Skipped { reason } => {
+                assert!(
+                    !reason.is_empty(),
+                    "skipped outcome must carry the fail-closed reason"
+                );
+            }
+            other => panic!(
+                "remote-v3 hub must produce Skipped (warn-and-continue), got {other:?}"
+            ),
+        }
+        let loaded = db.get_issue(id).unwrap().expect("agent row present");
+        assert_eq!(loaded.title, "agent row", "agent-authored row must survive");
+        assert!(
+            db.get_issue(999).unwrap().is_none(),
+            "stale v2 issue must NOT be imported on a remote-v3 hub"
+        );
+    }
+
+    #[test]
+    fn test_tick_hydrate_v2_hydrates() {
+        // gh#125 r3 R2 — the happy path: on a confidently-v2-only hub the tick
+        // hydrates and reports the stats.
+        let (_dir, crosslink_dir, cache_dir) = setup_git_env_with_v2_cache();
+        let hub = make_issue(7, "v2 hub issue");
+        write_stale_issues(&cache_dir, &[hub]);
+
+        let (db, _tmp) = setup_test_db();
+        let outcome = crate::hydration::tick_hydrate(&crosslink_dir, &cache_dir, &db, false);
+        match outcome {
+            crate::hydration::TickHydrateOutcome::Hydrated(stats) => {
+                assert_eq!(stats.issues, 1, "the v2 issue must be hydrated");
+            }
+            other => panic!("v2-only hub must hydrate, got {other:?}"),
+        }
+        let loaded = db.get_issue(7).unwrap().expect("v2 issue hydrated");
+        assert_eq!(loaded.title, "v2 hub issue");
+    }
+
+    #[test]
+    fn test_tick_hydrate_v3_failure_consumed() {
+        // gh#125 r3 R2 — the v3 branch also warn-and-continues: a hydrate
+        // failure (here: a bogus cache path that RefHubSource cannot read)
+        // resolves to Failed, never propagates.
+        let dir = tempdir().unwrap();
+        let crosslink_dir = dir.path().join(".crosslink");
+        std::fs::create_dir_all(&crosslink_dir).unwrap();
+
+        let (db, _tmp) = setup_test_db();
+        let outcome = crate::hydration::tick_hydrate(
+            &crosslink_dir,
+            &dir.path().join("nonexistent-cache"),
+            &db,
+            true,
+        );
+        assert!(
+            matches!(
+                outcome,
+                crate::hydration::TickHydrateOutcome::Failed { .. }
+            ),
+            "a v3 hydrate failure must be consumed as Failed (warn-and-continue)"
+        );
+    }
+
+    #[test]
+    fn test_hydrate_v2_safely_locked_runs_under_held_lock() {
+        // gh#125 r3 R3 — the single-lock repair variant: a caller that ALREADY
+        // holds the hub write lock (the integrity repair) can run the
+        // dispatcher body without a second acquire — acquire_hub_lock is
+        // NON-REENTRANT (file-based create_new + 30s timeout), so a
+        // double-acquire would wait 30s, error, and skip fail-closed, making
+        // the repair report Fail every time. Under a held lock this variant
+        // must hydrate immediately on a confidently-v2-only hub.
+        let (_dir, crosslink_dir, cache_dir) = setup_git_env_with_v2_cache();
+        let hub = make_issue(7, "v2 hub issue");
+        write_stale_issues(&cache_dir, &[hub]);
+
+        // The test acquires the lock and keeps it held for the whole call —
+        // exactly the integrity-repair shape.
+        let lock_path = cache_dir.join(".hub-write-lock");
+        let lock = crate::sync::acquire_hub_lock(&lock_path)
+            .expect("test must acquire the hub write lock");
+
+        let (db, _tmp) = setup_test_db();
+        let outcome = crate::hydration::hydrate_v2_safely_locked(
+            &crosslink_dir,
+            &cache_dir,
+            &db,
+            &lock,
+        )
+        .expect("locked dispatcher must not error on a v2-only hydrate");
+        match outcome {
+            crate::hydration::V2HydrateOutcome::Hydrated(stats) => {
+                assert_eq!(stats.issues, 1, "the v2 issue must be hydrated");
+            }
+            crate::hydration::V2HydrateOutcome::Skipped { reason } => {
+                panic!("v2-only hub must hydrate under a held lock, skipped: {reason}");
+            }
+        }
+        let loaded = db.get_issue(7).unwrap().expect("v2 issue hydrated");
+        assert_eq!(loaded.title, "v2 hub issue");
+    }
+
+    #[test]
+    fn test_hydrate_v2_safely_locked_skips_on_v3_under_held_lock() {
+        // gh#125 r3 R3 — the locked variant keeps the fail-closed boundary:
+        // under a held lock on a remote-v3 hub it must still SKIP the
+        // destructive v2 file path (the probe is the same, just under the
+        // caller's lock instead of a fresh acquire).
+        let (dir, crosslink_dir, cache_dir, _remote_dir) = setup_remote_v3_local_v2_only();
+        let _work = dir.path().join("work");
+
+        let stale = make_issue(999, "stale v2 issue");
+        write_stale_issues(&cache_dir, &[stale]);
+
+        let lock_path = cache_dir.join(".hub-write-lock");
+        let lock = crate::sync::acquire_hub_lock(&lock_path)
+            .expect("test must acquire the hub write lock");
+
+        let (db, _tmp) = setup_test_db();
+        let id = db
+            .create_issue_with_author("agent row", None, "medium", Some("agent-7"))
+            .unwrap();
+        let outcome = crate::hydration::hydrate_v2_safely_locked(
+            &crosslink_dir,
+            &cache_dir,
+            &db,
+            &lock,
+        )
+        .expect("locked dispatcher must not error on a fail-closed skip");
+        assert!(
+            matches!(
+                outcome,
+                crate::hydration::V2HydrateOutcome::Skipped { .. }
+            ),
+            "remote-v3 hub must skip the v2 file path under a held lock (fail-closed)"
+        );
+        let loaded = db.get_issue(id).unwrap().expect("agent row present");
+        assert_eq!(loaded.title, "agent row", "agent-authored row must survive");
+        assert!(
+            db.get_issue(999).unwrap().is_none(),
+            "stale v2 issue must NOT be imported on a remote-v3 hub"
+        );
     }
 
     #[test]

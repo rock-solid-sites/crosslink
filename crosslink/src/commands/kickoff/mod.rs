@@ -165,7 +165,9 @@ pub fn dispatch(
             force,
             keep,
             json: cleanup_json,
-        } => cleanup(crosslink_dir, dry_run, force, keep, cleanup_json),
+            only,
+            yes,
+        } => cleanup(crosslink_dir, dry_run, force, keep, cleanup_json, &only, yes),
         KickoffCommands::Launch {
             doc,
             plan: do_plan,

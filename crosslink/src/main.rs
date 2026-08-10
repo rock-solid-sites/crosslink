@@ -1803,7 +1803,9 @@ enum KickoffCommands {
         /// Show what would be cleaned without doing anything
         #[arg(long = "dry-run")]
         dry_run: bool,
-        /// Also clean up potentially stale agents (not just confirmed-done)
+        /// Also clean up potentially stale agents (not just confirmed-done).
+        /// OPERATOR-ONLY: requires CROSSLINK_OPERATOR=1 — agent invocations
+        /// are refused (ASES #349/#350).
         #[arg(long)]
         force: bool,
         /// Keep the N most recently completed agents
@@ -1812,6 +1814,13 @@ enum KickoffCommands {
         /// Output as JSON
         #[arg(long)]
         json: bool,
+        /// Only remove the named agents (comma-separated IDs or worktree
+        /// slugs). Mutually exclusive with --force and --keep.
+        #[arg(long, value_delimiter = ',')]
+        only: Vec<String>,
+        /// Confirm the blast radius without prompting (required with --json)
+        #[arg(long)]
+        yes: bool,
     },
     /// Show branch topology of kickoff feature branches
     Graph {

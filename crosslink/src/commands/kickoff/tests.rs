@@ -1,6 +1,7 @@
 use std::path::Path;
 use std::time::Duration;
 
+use super::cleanup::*;
 use super::helpers::*;
 use super::launch::*;
 use super::monitor::*;
@@ -3928,4 +3929,274 @@ fn test_build_prompt_without_base_has_no_base_stanza() {
         !prompt.contains("no merge needed"),
         "prompt without --base must not claim parent work is present: {prompt}"
     );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// kickoff cleanup rescope (ASES #349/#350)
+// ─────────────────────────────────────────────────────────────────────────────
+
+fn make_agent(id: &str, status: &str, worktree: &str, session: Option<&str>) -> AgentInfo {
+    AgentInfo {
+        id: id.to_string(),
+        issue: None,
+        status: status.to_string(),
+        session: session.map(|s| s.to_string()),
+        worktree: worktree.to_string(),
+        docker: None,
+    }
+}
+
+/// `--only` must resolve to exactly the named agents and nothing else.
+#[test]
+fn test_cleanup_only_selects_exactly_named() {
+    let agents = vec![
+        make_agent("pp3g-AAA", "done", "/wt/pp3g-AAA", None),
+        make_agent("pp3g-BBB", "done", "/wt/pp3g-BBB", None),
+        make_agent("pp3g-CCC", "stopped", "/wt/pp3g-CCC", None),
+        make_agent("pp3g-DDD", "running", "/wt/pp3g-DDD", None),
+    ];
+    let only = vec!["pp3g-AAA".to_string(), "pp3g-CCC".to_string()];
+    let plan = plan_cleanup(agents, &only, false, 0).unwrap();
+
+    let ids: Vec<&str> = plan.to_clean.iter().map(|(a, _)| a.id.as_str()).collect();
+    assert_eq!(ids, vec!["pp3g-AAA", "pp3g-CCC"]);
+    // No skipped-stale bucket in --only mode; un-named agents are untouched.
+    assert!(plan.skipped_stale.is_empty());
+    assert!(plan.active.is_empty());
+}
+
+/// `--only` resolving by worktree dir name / `feature/` slug / driver-- id.
+#[test]
+fn test_cleanup_only_resolves_worktree_slug() {
+    let agents = vec![make_agent("driver--my-feature", "done", "/wt/my-feature", None)];
+
+    let plan = plan_cleanup(agents.clone(), &["my-feature".to_string()], false, 0).unwrap();
+    assert_eq!(plan.to_clean.len(), 1);
+    assert_eq!(plan.to_clean[0].0.id, "driver--my-feature");
+
+    let plan = plan_cleanup(agents.clone(), &["feature/my-feature".to_string()], false, 0).unwrap();
+    assert_eq!(plan.to_clean.len(), 1);
+
+    let plan = plan_cleanup(agents, &["driver--my-feature".to_string()], false, 0).unwrap();
+    assert_eq!(plan.to_clean.len(), 1);
+}
+
+/// `--only` must refuse to remove an active (running) agent.
+#[test]
+fn test_cleanup_only_refuses_active_named() {
+    let agents = vec![make_agent("pp3g-AAA", "running", "/wt/pp3g-AAA", Some("s-aaa"))];
+    let only = vec!["pp3g-AAA".to_string()];
+    let err = plan_cleanup(agents, &only, false, 0).unwrap_err();
+    assert!(err.to_string().contains("active"), "got: {err}");
+}
+
+/// `--only` must fail closed on unknown IDs — no silent partial removal.
+#[test]
+fn test_cleanup_only_unknown_id_errors() {
+    let agents = vec![make_agent("pp3g-AAA", "done", "/wt/pp3g-AAA", None)];
+    let only = vec!["pp3g-NOPE".to_string()];
+    let err = plan_cleanup(agents, &only, false, 0).unwrap_err();
+    assert!(err.to_string().contains("not found"), "got: {err}");
+}
+
+/// `--only` is mutually exclusive with the blanket `--force` and `--keep`.
+#[test]
+fn test_cleanup_only_mutually_exclusive_with_blanket_flags() {
+    let agents = vec![make_agent("pp3g-AAA", "done", "/wt/pp3g-AAA", None)];
+    let only = vec!["pp3g-AAA".to_string()];
+
+    let err = plan_cleanup(agents.clone(), &only, true, 0).unwrap_err();
+    assert!(err.to_string().contains("--force"), "got: {err}");
+
+    let err = plan_cleanup(agents, &only, false, 2).unwrap_err();
+    assert!(err.to_string().contains("--keep"), "got: {err}");
+}
+
+/// Blanket path without --force removes confirmed-DONE only (never STALE).
+#[test]
+fn test_cleanup_blanket_without_force_only_done() {
+    let agents = vec![
+        make_agent("pp3g-AAA", "done", "", None),
+        make_agent("pp3g-BBB", "stopped", "", None),
+        make_agent("pp3g-CCC", "failed", "", None),
+    ];
+    let plan = plan_cleanup(agents, &[], false, 0).unwrap();
+
+    let ids: Vec<&str> = plan.to_clean.iter().map(|(a, _)| a.id.as_str()).collect();
+    assert_eq!(ids, vec!["pp3g-AAA", "pp3g-CCC"]);
+    let skipped: Vec<&str> = plan
+        .skipped_stale
+        .iter()
+        .map(|(a, _)| a.id.as_str())
+        .collect();
+    assert_eq!(skipped, vec!["pp3g-BBB"]);
+}
+
+/// `--force` is operator-only: refused without CROSSLINK_OPERATOR=1, and the
+/// refusal happens before any planning/printing so agents structurally cannot
+/// reach the STALE sweep. All env mutation lives in this one test to avoid
+/// parallel-test races on the process environment.
+#[test]
+fn test_cleanup_force_operator_gate() {
+    std::env::remove_var(OPERATOR_ENV);
+    assert!(!operator_gate_ok());
+
+    let dir = tempfile::tempdir().unwrap();
+    let agents = vec![make_agent("pp3g-AAA", "stopped", "/wt/pp3g-AAA", None)];
+    let mut confirmer = || true;
+
+    // Agent-style invocation (no operator env) → refused.
+    let err = cleanup_with_agents(
+        dir.path(),
+        false,
+        true,
+        0,
+        false,
+        &[],
+        true,
+        agents.clone(),
+        &mut confirmer,
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("operator-only"), "got: {err}");
+
+    // Non-"1" values are not accepted.
+    std::env::set_var(OPERATOR_ENV, "0");
+    assert!(!operator_gate_ok());
+
+    // Operator env set → the blanket STALE sweep is reachable.
+    std::env::set_var(OPERATOR_ENV, "1");
+    assert!(operator_gate_ok());
+    let res = cleanup_with_agents(
+        dir.path(),
+        false,
+        true,
+        0,
+        false,
+        &[],
+        true,
+        agents.clone(),
+        &mut confirmer,
+    );
+    std::env::remove_var(OPERATOR_ENV);
+    assert!(res.is_ok(), "got: {res:?}");
+}
+
+/// Non-force removal requires explicit confirmation: declining executes
+/// nothing; confirming removes exactly the DONE agents.
+#[test]
+fn test_cleanup_nonforce_confirmation_required() {
+    let dir = tempfile::tempdir().unwrap();
+    let agents = vec![
+        make_agent("pp3g-AAA", "done", "", None),
+        make_agent("pp3g-BBB", "done", "", None),
+    ];
+
+    let mut declining = || false;
+    let results = cleanup_with_agents(
+        dir.path(),
+        false,
+        false,
+        0,
+        false,
+        &[],
+        false,
+        agents.clone(),
+        &mut declining,
+    )
+    .unwrap();
+    assert!(
+        results.is_empty(),
+        "declining confirmation must not remove anything"
+    );
+
+    let mut confirming = || true;
+    let results = cleanup_with_agents(
+        dir.path(),
+        false,
+        false,
+        0,
+        false,
+        &[],
+        false,
+        agents.clone(),
+        &mut confirming,
+    )
+    .unwrap();
+    let mut ids: Vec<&str> = results.iter().map(|r| r.id.as_str()).collect();
+    ids.sort_unstable();
+    assert_eq!(ids, vec!["pp3g-AAA", "pp3g-BBB"]);
+}
+
+/// `--only` at execution level: confirmed removal touches exactly the named
+/// agents and no others.
+#[test]
+fn test_cleanup_only_executes_only_named() {
+    let dir = tempfile::tempdir().unwrap();
+    let agents = vec![
+        make_agent("pp3g-AAA", "done", "", None),
+        make_agent("pp3g-BBB", "done", "", None),
+        make_agent("pp3g-CCC", "done", "", None),
+    ];
+    let only = vec!["pp3g-AAA".to_string(), "pp3g-CCC".to_string()];
+    let mut confirming = || true;
+
+    let results = cleanup_with_agents(
+        dir.path(),
+        false,
+        false,
+        0,
+        false,
+        &only,
+        true,
+        agents,
+        &mut confirming,
+    )
+    .unwrap();
+    let ids: Vec<&str> = results.iter().map(|r| r.id.as_str()).collect();
+    assert_eq!(ids, vec!["pp3g-AAA", "pp3g-CCC"]);
+}
+
+/// Dry-run never executes and never asks for confirmation.
+#[test]
+fn test_cleanup_only_dry_run_returns_plan_without_execution() {
+    let dir = tempfile::tempdir().unwrap();
+    let agents = vec![make_agent("pp3g-AAA", "done", "", None)];
+    let mut confirmer = || panic!("dry-run must not prompt for confirmation");
+
+    let results = cleanup_with_agents(
+        dir.path(),
+        true,
+        false,
+        0,
+        false,
+        &["pp3g-AAA".to_string()],
+        false,
+        agents,
+        &mut confirmer,
+    )
+    .unwrap();
+    assert!(results.is_empty());
+}
+
+/// JSON mode must refuse non-interactive removal without --yes.
+#[test]
+fn test_cleanup_json_requires_yes() {
+    let dir = tempfile::tempdir().unwrap();
+    let agents = vec![make_agent("pp3g-AAA", "done", "", None)];
+    let mut confirmer = || true;
+
+    let err = cleanup_with_agents(
+        dir.path(),
+        false,
+        false,
+        0,
+        true,
+        &["pp3g-AAA".to_string()],
+        false,
+        agents,
+        &mut confirmer,
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("--yes"), "got: {err}");
 }

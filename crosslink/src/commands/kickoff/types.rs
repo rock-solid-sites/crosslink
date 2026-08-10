@@ -315,7 +315,7 @@ impl Default for WatchdogConfig {
 }
 
 /// Information about a discovered kickoff agent.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub(super) struct AgentInfo {
     pub id: String,
     pub issue: Option<String>,

@@ -1,6 +1,7 @@
 // E-ana tablet — kickoff cleanup: remove stale agent artifacts
-use anyhow::Result;
+use anyhow::{bail, Result};
 use serde::Serialize;
+use std::io::{self, Write};
 use std::path::Path;
 use std::process::Command;
 
@@ -8,53 +9,103 @@ use super::helpers::*;
 use super::monitor::discover_agents;
 use super::types::*;
 
+/// Environment variable that must be set to `1` for the operator-only
+/// blanket `--force` sweep. Agent launches never set this variable, so an
+/// agent-invoked `cleanup --force` fails structurally instead of relying on
+/// the agent "being careful" (ASES #349/#350 — the #227 incident class).
+pub(super) const OPERATOR_ENV: &str = "CROSSLINK_OPERATOR";
+
+/// What a cleanup invocation would remove, before any filesystem mutation.
+///
+/// Pure selection logic so the safety properties (exact `--only` matching,
+/// active-agent refusal, blanket DONE-only partitioning) are unit-testable.
+#[derive(Debug, Default)]
+pub(super) struct CleanupPlan {
+    /// Agents that will be removed (confirmed-DONE in the blanket path, or
+    /// exactly the named agents in `--only` mode).
+    pub to_clean: Vec<(AgentInfo, CleanupClass)>,
+    /// STALE agents skipped by the non-force blanket path. Empty in
+    /// `--only` mode (a named agent is either removed or refused).
+    pub skipped_stale: Vec<(AgentInfo, CleanupClass)>,
+    /// Agents that are still active and were never considered for removal
+    /// (in `--only` mode: named agents that were refused for being active).
+    pub active: Vec<(AgentInfo, CleanupClass)>,
+}
+
 /// `crosslink kickoff cleanup`
 ///
 /// Discover and remove stale kickoff agent artifacts: completed tmux sessions,
-/// worktrees with DONE sentinels, and orphaned worktrees whose sessions no longer exist.
+/// worktrees with DONE sentinels, and orphaned worktrees whose sessions no
+/// longer exist.
+///
+/// Removal is always explicit:
+/// * `--only <id1,id2,...>` removes exactly the named agents (worktrees +
+///   tmux + containers) and nothing else; it refuses to touch active agents
+///   and errors on unknown IDs. Mutually exclusive with `--force`/`--keep`.
+/// * The blanket path removes confirmed-DONE agents only, unless the
+///   operator-only `--force` is used (requires `CROSSLINK_OPERATOR=1`).
+/// * Every non-dry-run removal prints the full blast radius and requires
+///   explicit confirmation: `--yes`, or an interactive [y/N] prompt.
 pub fn cleanup(
     crosslink_dir: &Path,
     dry_run: bool,
     force: bool,
     keep: usize,
     json_output: bool,
+    only: &[String],
+    yes: bool,
 ) -> Result<()> {
     let agents = discover_agents(crosslink_dir)?;
+    cleanup_with_agents(
+        crosslink_dir,
+        dry_run,
+        force,
+        keep,
+        json_output,
+        only,
+        yes,
+        agents,
+        &mut default_confirmation,
+    )?;
+    Ok(())
+}
 
-    // Classify and separate active agents from removable ones
-    let (active, removable): (Vec<_>, Vec<_>) = agents
-        .into_iter()
-        .map(|a| {
-            let class = classify_agent(&a);
-            (a, class)
-        })
-        .partition(|(_, class)| *class == CleanupClass::Active);
+/// Shared implementation, parameterised over agent discovery and the
+/// confirmation source so the safety gates are testable without real
+/// worktrees, tmux sessions, or stdin.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn cleanup_with_agents(
+    crosslink_dir: &Path,
+    dry_run: bool,
+    force: bool,
+    keep: usize,
+    json_output: bool,
+    only: &[String],
+    yes: bool,
+    agents: Vec<AgentInfo>,
+    confirmer: &mut dyn FnMut() -> bool,
+) -> Result<Vec<CleanupResult>> {
+    // The blanket --force sweep is operator-only (ASES #349/#350): without
+    // the operator environment variable, refuse before even planning so an
+    // agent invocation can never reach the STALE sweep.
+    if force && !operator_gate_ok() {
+        bail!(
+            "cleanup --force is operator-only: set {OPERATOR_ENV}=1 to run a \
+             blanket STALE sweep. Agent invocations cannot bulk-delete stale \
+             agents (ASES #349/#350)."
+        );
+    }
 
-    // Without --force, only clean Done agents (not Stale)
-    let (mut to_clean, skipped_stale): (Vec<_>, Vec<_>) = if force {
-        (removable, vec![])
-    } else {
-        removable
-            .into_iter()
-            .partition(|(_, class)| *class == CleanupClass::Done)
-    };
-
-    // Sort by worktree path (as a proxy for creation order) so --keep works predictably
-    to_clean.sort_by(|a, b| a.0.worktree.cmp(&b.0.worktree));
-
-    // Apply --keep: keep the N most recent (last N items after sorting)
-    let to_clean = if keep > 0 && to_clean.len() > keep {
-        to_clean[..to_clean.len() - keep].to_vec()
-    } else if keep > 0 && to_clean.len() <= keep {
-        vec![] // keep all
-    } else {
-        to_clean
-    };
+    let CleanupPlan {
+        to_clean,
+        skipped_stale,
+        active,
+    } = plan_cleanup(agents, only, force, keep)?;
 
     // --- Dry-run / JSON output ---
     if json_output {
         #[derive(Serialize)]
-        struct CleanupPlan {
+        struct CleanupPlanJson {
             to_clean: Vec<CleanupPlanEntry>,
             skipped_stale: Vec<CleanupPlanEntry>,
             active: Vec<CleanupPlanEntry>,
@@ -82,15 +133,15 @@ pub fn cleanup(
                 })
                 .collect()
         };
-        let plan = CleanupPlan {
+        let plan_json = CleanupPlanJson {
             to_clean: to_entry(&to_clean),
             skipped_stale: to_entry(&skipped_stale),
             active: to_entry(&active),
             dry_run,
         };
-        println!("{}", serde_json::to_string_pretty(&plan)?);
+        println!("{}", serde_json::to_string_pretty(&plan_json)?);
         if dry_run {
-            return Ok(());
+            return Ok(Vec::new());
         }
     }
 
@@ -98,7 +149,7 @@ pub fn cleanup(
         if !json_output {
             println!("No agents to clean up.");
         }
-        return Ok(());
+        return Ok(Vec::new());
     }
 
     if dry_run || !json_output {
@@ -138,7 +189,7 @@ pub fn cleanup(
 
         if !skipped_stale.is_empty() {
             println!(
-                "\n{} stale agent(s) skipped (use --force to include):",
+                "\n{} stale agent(s) skipped (operator-only sweep: {OPERATOR_ENV}=1 with --force):",
                 skipped_stale.len()
             );
             for (agent, _) in &skipped_stale {
@@ -172,10 +223,24 @@ pub fn cleanup(
             }
             println!(".");
             println!("Run without --dry-run to proceed.");
-            return Ok(());
+            return Ok(Vec::new());
         }
 
         println!();
+    }
+
+    // --- Confirmation: the full blast radius was printed above ---
+    if !yes {
+        if json_output {
+            bail!(
+                "cleanup: --json requires --yes to confirm the blast radius \
+                 (refusing non-interactive removal)"
+            );
+        }
+        if !confirmer() {
+            println!("Cleanup cancelled.");
+            return Ok(Vec::new());
+        }
     }
 
     // --- Execute cleanup ---
@@ -316,5 +381,151 @@ pub fn cleanup(
         println!(".");
     }
 
-    Ok(())
+    Ok(results)
+}
+
+/// Decide what a cleanup invocation would remove, without touching the
+/// filesystem.
+pub(super) fn plan_cleanup(
+    agents: Vec<AgentInfo>,
+    only: &[String],
+    force: bool,
+    keep: usize,
+) -> Result<CleanupPlan> {
+    // --- Selective mode: --only <id1,id2,...> ---
+    if !only.is_empty() {
+        if force {
+            bail!("cleanup: --only cannot be combined with --force");
+        }
+        if keep > 0 {
+            bail!("cleanup: --only cannot be combined with --keep");
+        }
+        let resolved = resolve_only_agents(&agents, only)?;
+        let mut to_clean = Vec::new();
+        let mut active = Vec::new();
+        for agent in resolved {
+            let class = classify_agent(agent);
+            if class == CleanupClass::Active {
+                active.push((agent.clone(), class));
+            } else {
+                to_clean.push((agent.clone(), class));
+            }
+        }
+        if !active.is_empty() {
+            bail!(
+                "cleanup --only: refusing to remove active agent(s): {} (stop them first)",
+                active
+                    .iter()
+                    .map(|(a, _)| a.id.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+        }
+        return Ok(CleanupPlan {
+            to_clean,
+            skipped_stale: Vec::new(),
+            active,
+        });
+    }
+
+    // --- Blanket path ---
+    let (active, removable): (Vec<_>, Vec<_>) = agents
+        .into_iter()
+        .map(|a| {
+            let class = classify_agent(&a);
+            (a, class)
+        })
+        .partition(|(_, class)| *class == CleanupClass::Active);
+
+    // Without --force, only clean Done agents (not Stale)
+    let (mut to_clean, skipped_stale): (Vec<_>, Vec<_>) = if force {
+        (removable, vec![])
+    } else {
+        removable
+            .into_iter()
+            .partition(|(_, class)| *class == CleanupClass::Done)
+    };
+
+    // Sort by worktree path (as a proxy for creation order) so --keep works predictably
+    to_clean.sort_by(|a, b| a.0.worktree.cmp(&b.0.worktree));
+
+    // Apply --keep: keep the N most recent (last N items after sorting)
+    let to_clean = if keep > 0 && to_clean.len() > keep {
+        to_clean[..to_clean.len() - keep].to_vec()
+    } else if keep > 0 && to_clean.len() <= keep {
+        vec![] // keep all
+    } else {
+        to_clean
+    };
+
+    Ok(CleanupPlan {
+        to_clean,
+        skipped_stale,
+        active,
+    })
+}
+
+/// Resolve `--only` IDs against the discovered agents.
+///
+/// Accepts the agent ID exactly as stored, the worktree directory name, or a
+/// `feature/...` / `feat-...` branch-style slug (mirroring `kickoff status`).
+/// Fails closed: any named ID that does not resolve to an agent is an error,
+/// so `--only` can never silently drop part of the requested removal.
+pub(super) fn resolve_only_agents<'a>(
+    agents: &'a [AgentInfo],
+    only: &[String],
+) -> Result<Vec<&'a AgentInfo>> {
+    let mut resolved: Vec<&'a AgentInfo> = Vec::new();
+    let mut missing: Vec<String> = Vec::new();
+    for raw in only {
+        let id = raw.trim();
+        if id.is_empty() {
+            continue;
+        }
+        let slug = id
+            .strip_prefix("feature/")
+            .or_else(|| id.strip_prefix("feat-"))
+            .unwrap_or(id);
+        let wt_slug = slug.rsplit("--").next().unwrap_or(slug);
+        let matched = agents.iter().find(|a| {
+            a.id == id
+                || a.id == format!("driver--{wt_slug}")
+                || Path::new(&a.worktree)
+                    .file_name()
+                    .map_or(false, |n| n.to_string_lossy() == wt_slug)
+        });
+        match matched {
+            Some(agent) => {
+                if !resolved.iter().any(|r| r.id == agent.id) {
+                    resolved.push(agent);
+                }
+            }
+            None => missing.push(id.to_string()),
+        }
+    }
+    if !missing.is_empty() {
+        bail!("cleanup --only: agent(s) not found: {}", missing.join(", "));
+    }
+    Ok(resolved)
+}
+
+/// The blanket `--force` sweep is operator-only. Agents never have
+/// `CROSSLINK_OPERATOR=1` in their launch environment, so an agent-invoked
+/// `cleanup --force` fails in [`cleanup_with_agents`] before planning or
+/// printing anything. The operator runs:
+/// `CROSSLINK_OPERATOR=1 crosslink kickoff cleanup --force [--yes]`.
+pub(super) fn operator_gate_ok() -> bool {
+    std::env::var(OPERATOR_ENV).map_or(false, |v| v.trim() == "1")
+}
+
+/// Interactive [y/N] confirmation used by the public CLI entry point.
+/// Fail-closed: any read error or non-"y" answer cancels the cleanup.
+fn default_confirmation() -> bool {
+    eprint!("Proceed with removal? [y/N] ");
+    let _ = io::stdout().flush();
+    let mut input = String::new();
+    match io::stdin().read_line(&mut input) {
+        Ok(_) => input.trim().eq_ignore_ascii_case("y"),
+        Err(_) => false,
+    }
 }

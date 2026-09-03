@@ -1,5 +1,5 @@
 {
-  "next_display_id": 799,
+  "next_display_id": 800,
   "next_comment_id": 1160,
   "display_id_map": {
     "00a365a3-7b31-465a-aced-4f1e39c68f8b": 118,
@@ -470,6 +470,7 @@
     "92a10a5a-0b1b-4d35-96ce-0ca8b9243b3b": 276,
     "93a207f4-5507-4327-b6d8-d7e8a9ba88fd": 445,
     "93bfa125-7d68-4634-b640-20257c0fe017": 531,
+    "941ecaa8-d814-4a5a-ac76-ef78229f165f": 799,
     "9448fd71-bc44-4152-8299-367abaca496f": 722,
     "9460fd4a-7e67-49ac-830e-0be55597c9b5": 541,
     "94bda4b1-1175-436b-9b0c-899fa3567ca6": 36,
@@ -14997,6 +14998,17 @@
         }
       }
     },
+    "941ecaa8-d814-4a5a-ac76-ef78229f165f": {
+      "uuid": "941ecaa8-d814-4a5a-ac76-ef78229f165f",
+      "display_id": 799,
+      "title": "Integrate shared AGENTS bridge into active Crosslink installation",
+      "description": "Goal: \n\nAcceptance criteria:\n- \n\nWave 2 implementation. Rebuild and install the bridge commits from the current feature branch into the active user-level Crosslink binary using the existing local installation path. Preserve the current binary as rollback, do not merge/rebase/push, do not touch unrelated stash or .crosslink/issues.db.backup, and verify the installed binary exposes the agents-hygiene command. Run focused and neighboring tests as appropriate. This is the corresponding local Crosslink issue for the delegated implementation.",
+      "status": "open",
+      "priority": "high",
+      "created_by": "driver",
+      "created_at": "2026-09-03T17:50:37.685965629Z",
+      "updated_at": "2026-09-03T17:50:37.685965629Z"
+    },
     "9448fd71-bc44-4152-8299-367abaca496f": {
       "uuid": "9448fd71-bc44-4152-8299-367abaca496f",
       "display_id": 722,
@@ -25405,11 +25417,16 @@
       "agent_id": "driver",
       "agent_seq": 54,
       "timestamp": "2026-09-03T14:01:46.950224828Z"
+    },
+    {
+      "agent_id": "driver",
+      "agent_seq": 55,
+      "timestamp": "2026-09-03T17:50:37.685965629Z"
     }
   ],
   "watermark": {
-    "timestamp": "2026-09-03T14:01:46.950224828Z",
+    "timestamp": "2026-09-03T17:50:37.685965629Z",
     "agent_id": "driver",
-    "agent_seq": 54
+    "agent_seq": 55
   }
 }

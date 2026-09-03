@@ -199,6 +199,14 @@ enum Commands {
         action: SessionCommands,
     },
 
+    /// Shared AGENTS hygiene bridge (temporary): check/sync the canonical
+    /// shared-policy snapshot in `.crosslink/agents-hygiene.json`.
+    #[command(name = "agents-hygiene")]
+    AgentsHygiene {
+        #[command(subcommand)]
+        action: AgentsHygieneCommands,
+    },
+
     /// Daemon management
     Daemon {
         #[command(subcommand)]
@@ -1194,6 +1202,28 @@ enum SessionCommands {
     Action {
         /// Description of what you just did or are doing
         text: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum AgentsHygieneCommands {
+    /// Check the canonical shared-policy snapshot; fails loudly when stale
+    /// or missing so startup wiring cannot silently pass.
+    Check {
+        /// Explicit path to the canonical ASES/AGENTS.md (overrides
+        /// hook-config `agents_hygiene.canonical_path` and sibling lookup).
+        #[arg(long)]
+        canonical: Option<String>,
+        /// Suppress the `current` line on success.
+        #[arg(long)]
+        quiet: bool,
+    },
+    /// Record the current canonical hash (idempotent; never touches
+    /// `AGENTS.repo.md`).
+    Sync {
+        /// Explicit path to the canonical ASES/AGENTS.md.
+        #[arg(long)]
+        canonical: Option<String>,
     },
 }
 
@@ -3114,6 +3144,24 @@ fn main() -> Result<()> {
             let db = get_db()?;
             let crosslink_dir = find_crosslink_dir()?;
             commands::session::run(action, &db, &crosslink_dir, cli.json)
+        }
+
+        Commands::AgentsHygiene { action } => {
+            let crosslink_dir = find_crosslink_dir()?;
+            match action {
+                AgentsHygieneCommands::Check { canonical, quiet } => {
+                    commands::agents_hygiene::run_check(
+                        &crosslink_dir,
+                        canonical.as_deref(),
+                        quiet,
+                    )?;
+                    Ok(())
+                }
+                AgentsHygieneCommands::Sync { canonical } => {
+                    commands::agents_hygiene::run_sync(&crosslink_dir, canonical.as_deref())?;
+                    Ok(())
+                }
+            }
         }
 
         Commands::Daemon { action } => match action {

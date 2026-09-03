@@ -267,6 +267,12 @@ these, ask the user to run it manually:
         verify_name = verify_name,
     );
 
+    // Shared AGENTS hygiene bridge (temporary): bind the worker to its
+    // active corresponding issue and state the canonical-policy check.
+    prompt.push_str(&crate::commands::agents_hygiene::build_kickoff_stanza(
+        issue_id,
+    ));
+
     // Inject design document sections if provided
     if let Some(doc) = opts.design_doc {
         prompt.push_str(&super::super::design_doc::build_design_doc_section(doc));

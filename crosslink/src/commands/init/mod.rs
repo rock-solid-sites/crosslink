@@ -1150,6 +1150,11 @@ pub fn run(path: &Path, opts: &InitOpts<'_>) -> Result<()> {
             .context("Failed to write init-manifest.json")?;
     }
 
+    // Shared AGENTS hygiene bridge (temporary): snapshot the canonical
+    // shared-policy hash when it resolves. Best-effort and silent — init
+    // must never fail on hygiene bookkeeping.
+    crate::commands::agents_hygiene::refresh_on_init(path);
+
     // Auto-install cpitd unless skipped
     if !skip_cpitd {
         ui.step_start("Checking cpitd");

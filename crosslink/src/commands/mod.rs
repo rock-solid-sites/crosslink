@@ -1,4 +1,5 @@
 pub mod agent;
+pub mod agents_hygiene;
 pub mod archive;
 pub mod comment;
 pub mod compact;

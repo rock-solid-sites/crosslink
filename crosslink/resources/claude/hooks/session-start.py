@@ -142,6 +142,42 @@ def auto_comment_on_resume(session_status):
     run_crosslink(["comment", issue_id, comment])
 
 
+def build_hygiene_context():
+    """Check the shared-policy snapshot; stale policy must never pass silently.
+
+    Runs `crosslink agents-hygiene check` and returns a loud warning block
+    when the snapshot is stale or missing. Best-effort: any transport or
+    tooling failure returns None so session startup never breaks on
+    hygiene bookkeeping. The canonical file is only hashed, never modified,
+    and `AGENTS.repo.md` is never touched.
+    """
+    global _crosslink_bin
+    try:
+        if _crosslink_bin is None:
+            _crosslink_bin = find_crosslink_binary(find_crosslink_dir())
+        proc = subprocess.run(
+            [_crosslink_bin, "agents-hygiene", "check"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError, Exception):
+        return None
+    if proc.returncode == 0:
+        return None
+    detail = (proc.stdout or "").strip() or (proc.stderr or "").strip()
+    if "agents-hygiene" not in detail:
+        detail = "shared-policy snapshot check failed; run `crosslink agents-hygiene check` for details."
+    return (
+        "## Shared Policy Hygiene — STALE\n"
+        "The canonical shared-policy snapshot is stale or missing. "
+        "Do NOT treat local policy text as current.\n"
+        f"{detail}\n"
+        "Remedy: `crosslink agents-hygiene sync` (records the canonical hash; "
+        "never overwrites `AGENTS.md` and never touches `AGENTS.repo.md`)."
+    )
+
+
 def get_working_issue_id(session_status):
     """Extract the working issue ID from session status text."""
     if not session_status:
@@ -290,6 +326,12 @@ def main():
     sync_result = run_crosslink(["sync"])
     if sync_result:
         context_parts.append(f"## Coordination Sync\n{sync_result}")
+
+    # Shared-policy hygiene bridge (temporary): stale snapshots must
+    # surface loudly in the startup context, never pass silently.
+    hygiene_warning = build_hygiene_context()
+    if hygiene_warning:
+        context_parts.append(hygiene_warning)
 
     # Show lock assignments
     locks_result = run_crosslink(["locks", "list"])

@@ -83,6 +83,16 @@ pub fn run(
         id
     };
 
+    // Shared AGENTS hygiene bridge (temporary): substantive delegation
+    // requires an active corresponding issue. Auto-created issues satisfy
+    // the gate (they are open by construction); explicit `--issue` values
+    // that are missing, closed, or archived fail loudly here.
+    crate::commands::agents_hygiene::require_corresponding_issue(
+        db,
+        crosslink_dir,
+        Some(issue_id),
+    )?;
+
     // 3. Create worktree and feature branch (or use existing branch)
     let (worktree_dir, branch_name) = if let Some(br) = opts.branch {
         // Use existing branch — check if worktree exists

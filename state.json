@@ -1,6 +1,6 @@
 {
   "next_display_id": 800,
-  "next_comment_id": 1161,
+  "next_comment_id": 1162,
   "display_id_map": {
     "00a365a3-7b31-465a-aced-4f1e39c68f8b": 118,
     "01b74b94-82e0-4bda-9bed-7eace0292544": 70,
@@ -15011,13 +15011,22 @@
       "priority": "high",
       "created_by": "driver",
       "created_at": "2026-09-03T17:50:37.685965629Z",
-      "updated_at": "2026-09-03T17:51:27.241533979Z",
+      "updated_at": "2026-09-03T17:52:27.665976820Z",
       "labels": [
         "feature",
         "policy-hygiene",
         "rollout"
       ],
       "comments": {
+        "488972c6-b764-4620-a25a-0803b295304f": {
+          "display_id": 1161,
+          "author": "driver",
+          "content": "[PROGRESS] Wave 2 bind: session bound to #799 on branch feature/pp3g-Zbk6-cleanup-rescope-349 at HEAD 23801054a6f9d791fa01e43e9af11a422aab648e; starting HEAD verification (expect 4da7cc1c) and focused bridge tests; no binary change yet.",
+          "created_at": "2026-09-03T17:52:27.659900009Z",
+          "kind": "plan",
+          "signed_by": "SHA256:cx5PuRP0j7pktPKktl0WwbMp5uEwfFy9WoiBcgyhe18",
+          "signature": "U1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAguEQKo5PmNONBqYSfFi6Ry6tvLy9D5GLM9YcPkF7QNdoAAAARY3Jvc3NsaW5rLWNvbW1lbnQAAAAAAAAABnNoYTUxMgAAAFMAAAALc3NoLWVkMjU1MTkAAABAnyd8aevlnZElhOH9kkXexENMF4mdEw8J1JySd8x2Gq7P6SOsb1lpYQiqgj/U8Od5t5lRuiFCTNsrfWCQ7T8lCQ=="
+        },
         "f4d8097b-60cd-4a69-87e5-0b2f3224b7f2": {
           "display_id": 1160,
           "author": "driver",
@@ -25467,11 +25476,16 @@
       "agent_id": "driver",
       "agent_seq": 60,
       "timestamp": "2026-09-03T17:52:19.392974340Z"
+    },
+    {
+      "agent_id": "driver",
+      "agent_seq": 61,
+      "timestamp": "2026-09-03T17:52:27.665976820Z"
     }
   ],
   "watermark": {
-    "timestamp": "2026-09-03T17:52:19.392974340Z",
+    "timestamp": "2026-09-03T17:52:27.665976820Z",
     "agent_id": "driver",
-    "agent_seq": 60
+    "agent_seq": 61
   }
 }

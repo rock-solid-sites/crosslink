@@ -1,6 +1,6 @@
 {
   "next_display_id": 800,
-  "next_comment_id": 1165,
+  "next_comment_id": 1166,
   "display_id_map": {
     "00a365a3-7b31-465a-aced-4f1e39c68f8b": 118,
     "01b74b94-82e0-4bda-9bed-7eace0292544": 70,
@@ -15011,13 +15011,22 @@
       "priority": "high",
       "created_by": "driver",
       "created_at": "2026-09-03T17:50:37.685965629Z",
-      "updated_at": "2026-09-03T17:54:48.894774504Z",
+      "updated_at": "2026-09-03T17:55:27.705158789Z",
       "labels": [
         "feature",
         "policy-hygiene",
         "rollout"
       ],
       "comments": {
+        "29fc803d-37ca-47c0-ada7-108c5b3afc28": {
+          "display_id": 1165,
+          "author": "driver",
+          "content": "[PROGRESS] Wave 2 resume accepted: approved build source is HEAD 23801054 (4da7cc1c + only handoffs/issue-799-integration.stub.md). Verified git diff 4da7cc1c..HEAD is exactly 1 file (stub). Branch feature/pp3g-Zbk6-cleanup-rescope-349. Worktree clean except untracked .crosslink/issues.db.backup left untouched. Stub preserved, no reset. Next: rollback copy, focused+neighbor tests, then rebuild/install.",
+          "created_at": "2026-09-03T17:55:27.697975431Z",
+          "kind": "plan",
+          "signed_by": "SHA256:cx5PuRP0j7pktPKktl0WwbMp5uEwfFy9WoiBcgyhe18",
+          "signature": "U1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAguEQKo5PmNONBqYSfFi6Ry6tvLy9D5GLM9YcPkF7QNdoAAAARY3Jvc3NsaW5rLWNvbW1lbnQAAAAAAAAABnNoYTUxMgAAAFMAAAALc3NoLWVkMjU1MTkAAABASgc9z/KcbtABwRRLlroJ1XNvRfXiacXD3ajFviFnhJNUtoNKTVe/2Urun1as8uG8zU/pLq3SFT6IeFuLG1UFAQ=="
+        },
         "488972c6-b764-4620-a25a-0803b295304f": {
           "display_id": 1161,
           "author": "driver",
@@ -25523,11 +25532,16 @@
       "agent_id": "driver",
       "agent_seq": 64,
       "timestamp": "2026-09-03T17:54:48.894774504Z"
+    },
+    {
+      "agent_id": "driver",
+      "agent_seq": 65,
+      "timestamp": "2026-09-03T17:55:27.705158789Z"
     }
   ],
   "watermark": {
-    "timestamp": "2026-09-03T17:54:48.894774504Z",
+    "timestamp": "2026-09-03T17:55:27.705158789Z",
     "agent_id": "driver",
-    "agent_seq": 64
+    "agent_seq": 65
   }
 }

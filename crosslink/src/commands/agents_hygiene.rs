@@ -8,8 +8,9 @@
 //!
 //! Design constraints (do not expand without a new approved scope):
 //! - Record minimal hash/version metadata in
-//!   `.crosslink/agents-hygiene.json`; never overwrite the canonical file
-//!   and never read, write, or incorporate `AGENTS.repo.md`.
+//!   `.crosslink/agents-hygiene.json`; copy only the canonical shared
+//!   `AGENTS.md` into the repository root and never read, write, or
+//!   incorporate `AGENTS.repo.md`.
 //! - Substantive delegation requires an active corresponding Crosslink
 //!   issue via the existing issue/session/kickoff mechanisms.
 //! - Worker recovery keeps the existing carriers (issue comments, session
@@ -36,6 +37,8 @@ const ACTIVE_ISSUE_SENTINEL: &str = ".active-issue";
 pub struct HygieneState {
     /// SHA-256 hex of the canonical `AGENTS.md` content at sync time.
     pub canonical_sha256: String,
+    /// SHA-256 hex of the repository-root shared `AGENTS.md` after sync.
+    pub shared_sha256: String,
     /// Where the canonical content was read from (as given/resolved).
     pub canonical_source: String,
     /// Sync timestamp (RFC 3339).
@@ -54,6 +57,7 @@ pub enum HygieneStatus {
         expected: String,
         actual: String,
         canonical: PathBuf,
+        target: PathBuf,
     },
     /// The canonical file could not be found.
     CanonicalMissing { attempted: PathBuf },
@@ -167,16 +171,40 @@ pub fn check_status(
             );
         }
     };
-    let actual = sha256_hex_str(&content);
+    let canonical_sha256 = sha256_hex_str(&content);
+    let target = crosslink_dir
+        .parent()
+        .unwrap_or(crosslink_dir)
+        .join("AGENTS.md");
+    let target_content = match std::fs::read_to_string(&target) {
+        Ok(content) => content,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => {
+            return Err(
+                anyhow::Error::from(e).context(format!("Failed to read {}", target.display()))
+            );
+        }
+    };
+    let target_sha256 = sha256_hex_str(&target_content);
     match read_state(crosslink_dir) {
-        None => Ok(HygieneStatus::NoRecord { actual, canonical }),
-        Some(state) if state.canonical_sha256 == actual => {
-            Ok(HygieneStatus::Current { sha256: actual })
+        None => Ok(HygieneStatus::NoRecord {
+            actual: canonical_sha256,
+            canonical,
+        }),
+        Some(state)
+            if state.canonical_sha256 == canonical_sha256
+                && state.shared_sha256 == target_sha256
+                && target_content == content =>
+        {
+            Ok(HygieneStatus::Current {
+                sha256: canonical_sha256,
+            })
         }
         Some(state) => Ok(HygieneStatus::Stale {
             expected: state.canonical_sha256,
-            actual,
+            actual: canonical_sha256,
             canonical,
+            target,
         }),
     }
 }
@@ -200,10 +228,12 @@ pub fn run_check(
             expected,
             actual,
             canonical,
+            target,
         } => {
             println!(
-                "agents-hygiene: STALE — {} changed since last sync\n  expected sha256:{expected}\n  actual   sha256:{actual}\n  remedy: crosslink agents-hygiene sync",
-                canonical.display()
+                "agents-hygiene: STALE — shared policy differs from canonical or last sync\n  canonical: {}\n  target:    {}\n  expected canonical sha256:{expected}\n  actual   canonical sha256:{actual}\n  remedy: crosslink agents-hygiene sync",
+                canonical.display(),
+                target.display()
             );
             anyhow::bail!("shared policy is stale; run `crosslink agents-hygiene sync`")
         }
@@ -224,7 +254,8 @@ pub fn run_check(
     }
 }
 
-/// `crosslink agents-hygiene sync`: record the current canonical hash.
+/// `crosslink agents-hygiene sync`: install the canonical shared policy and
+/// record both source and installed hashes.
 ///
 /// Idempotent: when the snapshot already matches, nothing is rewritten.
 /// Never touches `AGENTS.repo.md` (neither reads nor writes it); repo-local
@@ -233,54 +264,65 @@ pub fn run_sync(crosslink_dir: &Path, canonical_override: Option<&str>) -> Resul
     let canonical = resolve_canonical_path(crosslink_dir, canonical_override)?;
     let content = std::fs::read_to_string(&canonical)
         .with_context(|| format!("Failed to read {}", canonical.display()))?;
-    let actual = sha256_hex_str(&content);
+    let canonical_sha256 = sha256_hex_str(&content);
+    let target = crosslink_dir
+        .parent()
+        .unwrap_or(crosslink_dir)
+        .join("AGENTS.md");
+    let target_is_canonical = canonical
+        .canonicalize()
+        .ok()
+        .zip(target.canonicalize().ok())
+        .is_some_and(|(source, destination)| source == destination);
+    let target_content = std::fs::read_to_string(&target).unwrap_or_default();
+    let target_sha256 = sha256_hex_str(&target_content);
     if let Some(state) = read_state(crosslink_dir) {
-        if state.canonical_sha256 == actual {
-            println!("agents-hygiene: already current (sha256:{actual})");
-            return Ok(HygieneStatus::Current { sha256: actual });
+        if state.canonical_sha256 == canonical_sha256
+            && state.shared_sha256 == target_sha256
+            && (target_is_canonical || target_content == content)
+        {
+            println!("agents-hygiene: already current (sha256:{canonical_sha256})");
+            return Ok(HygieneStatus::Current {
+                sha256: canonical_sha256,
+            });
         }
     }
+    if !target_is_canonical && target_content != content {
+        let tmp = target.with_extension("md.crosslink-tmp");
+        std::fs::write(&tmp, &content)
+            .with_context(|| format!("Failed to write {}", tmp.display()))?;
+        std::fs::rename(&tmp, &target)
+            .with_context(|| format!("Failed to install shared policy at {}", target.display()))?;
+    }
     let state = HygieneState {
-        canonical_sha256: actual.clone(),
+        canonical_sha256: canonical_sha256.clone(),
+        shared_sha256: sha256_hex_str(&content),
         canonical_source: canonical.display().to_string(),
         recorded_at: chrono::Utc::now().to_rfc3339(),
         recorded_by_version: env!("CARGO_PKG_VERSION").to_string(),
     };
     write_state(crosslink_dir, &state)?;
     println!(
-        "agents-hygiene: synced {} (sha256:{actual})",
-        canonical.display()
+        "agents-hygiene: synced {} → {} (sha256:{canonical_sha256})",
+        canonical.display(),
+        target.display()
     );
-    Ok(HygieneStatus::Current { sha256: actual })
+    Ok(HygieneStatus::Current {
+        sha256: canonical_sha256,
+    })
 }
 
-/// Best-effort snapshot refresh during `crosslink init`.
+/// Best-effort shared-policy refresh during `crosslink init`.
 ///
-/// Records the canonical hash only when the canonical file resolves and
-/// reads cleanly; any failure is a silent no-op so init never breaks on
-/// hygiene bookkeeping. Never creates `AGENTS.repo.md` content.
+/// Installs the canonical shared file when it resolves and reads cleanly; any
+/// failure is a silent no-op so init never breaks on hygiene bookkeeping.
+/// Never creates or modifies `AGENTS.repo.md`.
 pub fn refresh_on_init(repo_path: &Path) {
     let crosslink_dir = repo_path.join(".crosslink");
     if !crosslink_dir.is_dir() {
         return;
     }
-    if read_state(&crosslink_dir).is_some() {
-        return;
-    }
-    let Ok(canonical) = resolve_canonical_path(&crosslink_dir, None) else {
-        return;
-    };
-    let Ok(content) = std::fs::read_to_string(&canonical) else {
-        return;
-    };
-    let actual = sha256_hex_str(&content);
-    let state = HygieneState {
-        canonical_sha256: actual,
-        canonical_source: canonical.display().to_string(),
-        recorded_at: chrono::Utc::now().to_rfc3339(),
-        recorded_by_version: env!("CARGO_PKG_VERSION").to_string(),
-    };
-    let _ = write_state(&crosslink_dir, &state);
+    let _ = run_sync(&crosslink_dir, None);
 }
 
 /// Gate substantive delegation on an active corresponding Crosslink issue.
@@ -527,18 +569,48 @@ mod tests {
 
     #[test]
     fn test_sync_preserves_repo_guidance() {
-        let crosslink = tempfile::tempdir().unwrap();
-        let canonical = write_canonical(&crosslink, "# shared\n");
-        let repo_guidance = crosslink.path().join(REPO_GUIDANCE_FILENAME);
+        let project = tempfile::tempdir().unwrap();
+        let crosslink_dir = project.path().join(".crosslink");
+        std::fs::create_dir(&crosslink_dir).unwrap();
+        let canonical_dir = tempfile::tempdir().unwrap();
+        let canonical = write_canonical(&canonical_dir, "# shared\n");
+        let repo_guidance = project.path().join(REPO_GUIDANCE_FILENAME);
         std::fs::write(&repo_guidance, "# repo-local\n").unwrap();
 
-        run_sync(crosslink.path(), canonical_arg(&canonical).as_deref()).unwrap();
+        run_sync(&crosslink_dir, canonical_arg(&canonical).as_deref()).unwrap();
 
-        // Untouched and still available after sync.
+        assert_eq!(
+            std::fs::read_to_string(project.path().join("AGENTS.md")).unwrap(),
+            "# shared\n"
+        );
         assert_eq!(
             std::fs::read_to_string(&repo_guidance).unwrap(),
             "# repo-local\n"
         );
+    }
+
+    #[test]
+    fn test_stale_target_is_reinstalled_from_canonical() {
+        let project = tempfile::tempdir().unwrap();
+        let crosslink_dir = project.path().join(".crosslink");
+        std::fs::create_dir(&crosslink_dir).unwrap();
+        let canonical_dir = tempfile::tempdir().unwrap();
+        let canonical = write_canonical(&canonical_dir, "# shared v1\n");
+        std::fs::write(project.path().join("AGENTS.md"), "# local stale\n").unwrap();
+
+        run_sync(&crosslink_dir, canonical_arg(&canonical).as_deref()).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(project.path().join("AGENTS.md")).unwrap(),
+            "# shared v1\n"
+        );
+        std::fs::write(&canonical, "# shared v2\n").unwrap();
+        assert!(run_check(&crosslink_dir, canonical_arg(&canonical).as_deref(), true).is_err());
+        run_sync(&crosslink_dir, canonical_arg(&canonical).as_deref()).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(project.path().join("AGENTS.md")).unwrap(),
+            "# shared v2\n"
+        );
+        assert!(run_check(&crosslink_dir, canonical_arg(&canonical).as_deref(), true).is_ok());
     }
 
     #[test]

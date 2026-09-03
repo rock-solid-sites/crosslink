@@ -143,13 +143,12 @@ def auto_comment_on_resume(session_status):
 
 
 def build_hygiene_context():
-    """Check the shared-policy snapshot; stale policy must never pass silently.
+    """Check and refresh shared policy; failures must never pass silently.
 
-    Runs `crosslink agents-hygiene check` and returns a loud warning block
-    when the snapshot is stale or missing. Best-effort: any transport or
-    tooling failure returns None so session startup never breaks on
-    hygiene bookkeeping. The canonical file is only hashed, never modified,
-    and `AGENTS.repo.md` is never touched.
+    Runs `check` first, then the existing `sync` command when needed. A
+    successful sync installs only the canonical shared `AGENTS.md`; any
+    tooling or canonical-path failure returns a loud warning block. Startup
+    remains best-effort, while a stale policy never passes silently.
     """
     global _crosslink_bin
     try:
@@ -165,7 +164,20 @@ def build_hygiene_context():
         return None
     if proc.returncode == 0:
         return None
+    try:
+        sync = subprocess.run(
+            [_crosslink_bin, "agents-hygiene", "sync"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError, Exception):
+        sync = None
+    if sync is not None and sync.returncode == 0:
+        return None
     detail = (proc.stdout or "").strip() or (proc.stderr or "").strip()
+    if sync is not None:
+        detail = detail or (sync.stdout or "").strip() or (sync.stderr or "").strip()
     if "agents-hygiene" not in detail:
         detail = "shared-policy snapshot check failed; run `crosslink agents-hygiene check` for details."
     return (
@@ -173,9 +185,24 @@ def build_hygiene_context():
         "The canonical shared-policy snapshot is stale or missing. "
         "Do NOT treat local policy text as current.\n"
         f"{detail}\n"
-        "Remedy: `crosslink agents-hygiene sync` (records the canonical hash; "
-        "never overwrites `AGENTS.md` and never touches `AGENTS.repo.md`)."
+        "Remedy: `crosslink agents-hygiene sync` (installs only canonical "
+        "`AGENTS.md`; never touches `AGENTS.repo.md`)."
     )
+
+
+def build_repo_guidance_context():
+    """Load repo-local guidance independently of shared-policy sync."""
+    try:
+        crosslink_dir = find_crosslink_dir()
+        repo_root = os.path.dirname(crosslink_dir)
+        guidance_path = os.path.join(repo_root, "AGENTS.repo.md")
+        if not os.path.isfile(guidance_path):
+            return None
+        with open(guidance_path, "r", encoding="utf-8") as guidance_file:
+            content = guidance_file.read().strip()
+        return f"## Repo-local Guidance (AGENTS.repo.md)\n{content}" if content else None
+    except (OSError, Exception):
+        return None
 
 
 def get_working_issue_id(session_status):
@@ -332,6 +359,10 @@ def main():
     hygiene_warning = build_hygiene_context()
     if hygiene_warning:
         context_parts.append(hygiene_warning)
+
+    repo_guidance = build_repo_guidance_context()
+    if repo_guidance:
+        context_parts.append(repo_guidance)
 
     # Show lock assignments
     locks_result = run_crosslink(["locks", "list"])

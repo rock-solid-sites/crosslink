@@ -3,8 +3,10 @@
 //! Minimal check/sync for the canonical shared policy (`ASES/AGENTS.md`)
 //! using existing Crosslink sync/init/session paths. Temporary scaffolding
 //! for the ASES tracker issue "Implement shared AGENTS hygiene bridge"
-//! (recon: ASES #551); Crosslink remains authoritative for task identity,
-//! state, evidence, retries, handoff association, and closure.
+//! (recon: ASES #551); the corresponding local Crosslink issue carries the
+//! work here, while the ASES Crosslink issue remains the authoritative tracker
+//! for task identity, state, evidence, retries, handoff association, and
+//! closure.
 //!
 //! Design constraints (do not expand without a new approved scope):
 //! - Record minimal hash/version metadata in

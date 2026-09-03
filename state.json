@@ -1,6 +1,6 @@
 {
   "next_display_id": 799,
-  "next_comment_id": 1154,
+  "next_comment_id": 1155,
   "display_id_map": {
     "00a365a3-7b31-465a-aced-4f1e39c68f8b": 118,
     "01b74b94-82e0-4bda-9bed-7eace0292544": 70,
@@ -19153,12 +19153,21 @@
       "priority": "medium",
       "created_by": "anon-ab6221f8",
       "created_at": "2026-03-26T13:54:04.899708613Z",
-      "updated_at": "2026-04-21T23:26:27.410852568Z",
+      "updated_at": "2026-09-03T12:55:55.238301010Z",
       "closed_at": "2026-04-21T23:26:27.410852568Z",
       "labels": [
         "security"
       ],
       "comments": {
+        "0a0db7fc-20a6-4828-85a0-cb46f20c2a76": {
+          "display_id": 1154,
+          "author": "driver",
+          "content": "[PROGRESS] state=sync-corrected completed=target-AGENTS-install-and-independent-repo-guidance-loading next=independent-review blocker=none; added installed shared-policy hash and real scratch-repo propagation coverage; AGENTS.repo.md remains untouched",
+          "created_at": "2026-09-03T12:55:55.228866635Z",
+          "kind": "observation",
+          "signed_by": "SHA256:cx5PuRP0j7pktPKktl0WwbMp5uEwfFy9WoiBcgyhe18",
+          "signature": "U1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAguEQKo5PmNONBqYSfFi6Ry6tvLy9D5GLM9YcPkF7QNdoAAAARY3Jvc3NsaW5rLWNvbW1lbnQAAAAAAAAABnNoYTUxMgAAAFMAAAALc3NoLWVkMjU1MTkAAABAwTLjajHE/CqxKxEhj1Ka6DS1cLLZzDtUpi2KOXbBdnt3r+ocFEzd32VDcv855p5FjWcslmhlzHoTYaP+6boXAQ=="
+        },
         "a20c33c3-4b79-411c-90b4-5d40e04d9cc7": {
           "author": "dashboard-bootstrap",
           "content": "Closed as stale: no activity in >7 days during the triage pass.",
@@ -25321,11 +25330,16 @@
       "agent_id": "driver",
       "agent_seq": 48,
       "timestamp": "2026-08-08T07:36:44.505270714Z"
+    },
+    {
+      "agent_id": "driver",
+      "agent_seq": 49,
+      "timestamp": "2026-09-03T12:55:55.238301010Z"
     }
   ],
   "watermark": {
-    "timestamp": "2026-08-08T07:36:44.505270714Z",
+    "timestamp": "2026-09-03T12:55:55.238301010Z",
     "agent_id": "driver",
-    "agent_seq": 48
+    "agent_seq": 49
   }
 }

@@ -34,8 +34,15 @@ def run_crosslink(args):
             timeout=5
         )
         return result.stdout.strip() if result.returncode == 0 else None
-    except (subprocess.TimeoutExpired, FileNotFoundError, Exception):
-        return None
+    except (subprocess.TimeoutExpired, FileNotFoundError, Exception) as error:
+        return (
+            "## Shared Policy Hygiene — UNAVAILABLE\n"
+            "The shared-policy freshness check could not run. Do NOT treat "
+            "local policy text as verified.\n"
+            f"Check error: {error}\n"
+            "Remedy: `crosslink agents-hygiene check` or "
+            "`crosslink agents-hygiene sync`."
+        )
 
 
 def _is_initialized(candidate):

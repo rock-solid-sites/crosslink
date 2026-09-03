@@ -1,6 +1,6 @@
 {
   "next_display_id": 799,
-  "next_comment_id": 1155,
+  "next_comment_id": 1156,
   "display_id_map": {
     "00a365a3-7b31-465a-aced-4f1e39c68f8b": 118,
     "01b74b94-82e0-4bda-9bed-7eace0292544": 70,
@@ -19153,7 +19153,7 @@
       "priority": "medium",
       "created_by": "anon-ab6221f8",
       "created_at": "2026-03-26T13:54:04.899708613Z",
-      "updated_at": "2026-09-03T12:55:55.238301010Z",
+      "updated_at": "2026-09-03T12:59:08.395326278Z",
       "closed_at": "2026-04-21T23:26:27.410852568Z",
       "labels": [
         "security"
@@ -19175,6 +19175,15 @@
           "kind": "result",
           "signed_by": "SHA256:6GbEO9gckWEeR3l6YB3LUaTe1Oc9qqn0WLtMVuu7a8A",
           "signature": "U1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAgqj5+UR1olg7w0+zZwuWbsWpzM2FlVsxso1l+rn8dSfAAAAASY3Jvc3NsaW5rLWJhY2tmaWxsAAAAAAAAAAZzaGE1MTIAAABTAAAAC3NzaC1lZDI1NTE5AAAAQM1QEWBvQqD+UsYsNkcpTmtkkLedL/CDEwLpXyXapcLQybxLDOqvCD+xiaP205Zh2ck3gzHyrXU+NdOQXi+Leg8="
+        },
+        "bcc54e85-a689-4717-a6ad-6ea4b2d2edd4": {
+          "display_id": 1155,
+          "author": "driver",
+          "content": "[PROGRESS] state=integration-verified completed=scratch-propagation-current-stale-resync-repo-guidance next=review-dispatch blocker=model-catalog-refresh-error; correction commits 21b91aae and 40e59c5c install canonical root AGENTS.md and track installed hash; previous hash-only draft was incomplete",
+          "created_at": "2026-09-03T12:59:08.385517356Z",
+          "kind": "observation",
+          "signed_by": "SHA256:cx5PuRP0j7pktPKktl0WwbMp5uEwfFy9WoiBcgyhe18",
+          "signature": "U1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAguEQKo5PmNONBqYSfFi6Ry6tvLy9D5GLM9YcPkF7QNdoAAAARY3Jvc3NsaW5rLWNvbW1lbnQAAAAAAAAABnNoYTUxMgAAAFMAAAALc3NoLWVkMjU1MTkAAABAB8bFSOPec90DVM88N+IbTVxXnWnicap5N92PIymfmj63RZFaqwhh0n6+Udh2WmxKdPw1ZYOWOesMzNl3MzyPAg=="
         }
       }
     },
@@ -25335,11 +25344,16 @@
       "agent_id": "driver",
       "agent_seq": 49,
       "timestamp": "2026-09-03T12:55:55.238301010Z"
+    },
+    {
+      "agent_id": "driver",
+      "agent_seq": 50,
+      "timestamp": "2026-09-03T12:59:08.395326278Z"
     }
   ],
   "watermark": {
-    "timestamp": "2026-09-03T12:55:55.238301010Z",
+    "timestamp": "2026-09-03T12:59:08.395326278Z",
     "agent_id": "driver",
-    "agent_seq": 49
+    "agent_seq": 50
   }
 }

@@ -961,10 +961,6 @@
     "792": {
       "agent_id": "dY7W-9AES-verify-the-13-files-committed-under-issue-792-commit",
       "claimed_at": "2026-07-31T19:36:04.186730618Z"
-    },
-    "799": {
-      "agent_id": "driver",
-      "claimed_at": "2026-09-03T17:52:19.392974340Z"
     }
   },
   "issues": {
@@ -25557,11 +25553,16 @@
       "agent_id": "driver",
       "agent_seq": 67,
       "timestamp": "2026-09-03T18:00:28.107510115Z"
+    },
+    {
+      "agent_id": "driver",
+      "agent_seq": 68,
+      "timestamp": "2026-09-03T18:00:28.494705947Z"
     }
   ],
   "watermark": {
-    "timestamp": "2026-09-03T18:00:28.107510115Z",
+    "timestamp": "2026-09-03T18:00:28.494705947Z",
     "agent_id": "driver",
-    "agent_seq": 67
+    "agent_seq": 68
   }
 }

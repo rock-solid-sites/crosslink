@@ -15007,11 +15007,12 @@
       "display_id": 799,
       "title": "Integrate shared AGENTS bridge into active Crosslink installation",
       "description": "Goal: \n\nAcceptance criteria:\n- \n\nWave 2 implementation. Rebuild and install the bridge commits from the current feature branch into the active user-level Crosslink binary using the existing local installation path. Preserve the current binary as rollback, do not merge/rebase/push, do not touch unrelated stash or .crosslink/issues.db.backup, and verify the installed binary exposes the agents-hygiene command. Run focused and neighboring tests as appropriate. This is the corresponding local Crosslink issue for the delegated implementation.",
-      "status": "open",
+      "status": "closed",
       "priority": "high",
       "created_by": "driver",
       "created_at": "2026-09-03T17:50:37.685965629Z",
-      "updated_at": "2026-09-03T18:00:27.669229608Z",
+      "updated_at": "2026-09-03T18:00:28.107510115Z",
+      "closed_at": "2026-09-03T18:00:28.107502828Z",
       "labels": [
         "feature",
         "policy-hygiene",
@@ -25551,11 +25552,16 @@
       "agent_id": "driver",
       "agent_seq": 66,
       "timestamp": "2026-09-03T18:00:27.669229608Z"
+    },
+    {
+      "agent_id": "driver",
+      "agent_seq": 67,
+      "timestamp": "2026-09-03T18:00:28.107510115Z"
     }
   ],
   "watermark": {
-    "timestamp": "2026-09-03T18:00:27.669229608Z",
+    "timestamp": "2026-09-03T18:00:28.107510115Z",
     "agent_id": "driver",
-    "agent_seq": 66
+    "agent_seq": 67
   }
 }

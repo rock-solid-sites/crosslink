@@ -1,6 +1,6 @@
 {
   "next_display_id": 800,
-  "next_comment_id": 1162,
+  "next_comment_id": 1163,
   "display_id_map": {
     "00a365a3-7b31-465a-aced-4f1e39c68f8b": 118,
     "01b74b94-82e0-4bda-9bed-7eace0292544": 70,
@@ -15011,7 +15011,7 @@
       "priority": "high",
       "created_by": "driver",
       "created_at": "2026-09-03T17:50:37.685965629Z",
-      "updated_at": "2026-09-03T17:52:27.665976820Z",
+      "updated_at": "2026-09-03T17:53:58.628021810Z",
       "labels": [
         "feature",
         "policy-hygiene",
@@ -15026,6 +15026,15 @@
           "kind": "plan",
           "signed_by": "SHA256:cx5PuRP0j7pktPKktl0WwbMp5uEwfFy9WoiBcgyhe18",
           "signature": "U1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAguEQKo5PmNONBqYSfFi6Ry6tvLy9D5GLM9YcPkF7QNdoAAAARY3Jvc3NsaW5rLWNvbW1lbnQAAAAAAAAABnNoYTUxMgAAAFMAAAALc3NoLWVkMjU1MTkAAABAnyd8aevlnZElhOH9kkXexENMF4mdEw8J1JySd8x2Gq7P6SOsb1lpYQiqgj/U8Od5t5lRuiFCTNsrfWCQ7T8lCQ=="
+        },
+        "57a38ec8-f16d-44e5-a849-f023040269a8": {
+          "display_id": 1162,
+          "author": "driver",
+          "content": "[BLOCKER] HEAD verification: expected 4da7cc1c per task, actual HEAD is 23801054a6f9d791fa01e43e9af11a422aab648e on branch feature/pp3g-Zbk6-cleanup-rescope-349. Diff 4da7cc1c..HEAD is exactly 1 file: handoffs/issue-799-integration.stub.md (the committed recovery stub this same workflow created as 23801054). Strict equality FAILS. Per task rule stopping before any binary change. No rebuild, no install, no binary copy, no merge/rebase/push/reset/clean/stash performed. Need explicit confirmation whether 23801054 (bridge + stub) is the approved build source, or whether to strip the stub to return to 4da7cc1c (no reset performed without approval).",
+          "created_at": "2026-09-03T17:53:58.621852800Z",
+          "kind": "blocker",
+          "signed_by": "SHA256:cx5PuRP0j7pktPKktl0WwbMp5uEwfFy9WoiBcgyhe18",
+          "signature": "U1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAguEQKo5PmNONBqYSfFi6Ry6tvLy9D5GLM9YcPkF7QNdoAAAARY3Jvc3NsaW5rLWNvbW1lbnQAAAAAAAAABnNoYTUxMgAAAFMAAAALc3NoLWVkMjU1MTkAAABAu1sN+4nZZ13GMi2tXeah61KBBcvxen66YAY0GB+rcJ1EHKunoNYjMorkfS6TpD9RTjHyGgR3NtYT28hm+ITjCA=="
         },
         "f4d8097b-60cd-4a69-87e5-0b2f3224b7f2": {
           "display_id": 1160,
@@ -25481,11 +25490,16 @@
       "agent_id": "driver",
       "agent_seq": 61,
       "timestamp": "2026-09-03T17:52:27.665976820Z"
+    },
+    {
+      "agent_id": "driver",
+      "agent_seq": 62,
+      "timestamp": "2026-09-03T17:53:58.628021810Z"
     }
   ],
   "watermark": {
-    "timestamp": "2026-09-03T17:52:27.665976820Z",
+    "timestamp": "2026-09-03T17:53:58.628021810Z",
     "agent_id": "driver",
-    "agent_seq": 61
+    "agent_seq": 62
   }
 }

@@ -15007,10 +15007,11 @@
       "priority": "high",
       "created_by": "driver",
       "created_at": "2026-09-03T17:50:37.685965629Z",
-      "updated_at": "2026-09-03T17:50:38.740842963Z",
+      "updated_at": "2026-09-03T17:50:39.207477838Z",
       "labels": [
         "feature",
-        "policy-hygiene"
+        "policy-hygiene",
+        "rollout"
       ]
     },
     "9448fd71-bc44-4152-8299-367abaca496f": {
@@ -25436,11 +25437,16 @@
       "agent_id": "driver",
       "agent_seq": 57,
       "timestamp": "2026-09-03T17:50:38.740842963Z"
+    },
+    {
+      "agent_id": "driver",
+      "agent_seq": 58,
+      "timestamp": "2026-09-03T17:50:39.207477838Z"
     }
   ],
   "watermark": {
-    "timestamp": "2026-09-03T17:50:38.740842963Z",
+    "timestamp": "2026-09-03T17:50:39.207477838Z",
     "agent_id": "driver",
-    "agent_seq": 57
+    "agent_seq": 58
   }
 }

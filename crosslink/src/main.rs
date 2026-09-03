@@ -200,7 +200,7 @@ enum Commands {
     },
 
     /// Shared AGENTS hygiene bridge (temporary): check/sync the canonical
-    /// shared-policy snapshot in `.crosslink/agents-hygiene.json`.
+    /// shared policy and its hashes in `.crosslink/agents-hygiene.json`.
     #[command(name = "agents-hygiene")]
     AgentsHygiene {
         #[command(subcommand)]
@@ -1218,7 +1218,7 @@ enum AgentsHygieneCommands {
         #[arg(long)]
         quiet: bool,
     },
-    /// Record the current canonical hash (idempotent; never touches
+    /// Install the canonical shared policy (idempotent; never touches
     /// `AGENTS.repo.md`).
     Sync {
         /// Explicit path to the canonical ASES/AGENTS.md.

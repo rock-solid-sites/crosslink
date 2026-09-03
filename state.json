@@ -1,6 +1,6 @@
 {
   "next_display_id": 799,
-  "next_comment_id": 1158,
+  "next_comment_id": 1159,
   "display_id_map": {
     "00a365a3-7b31-465a-aced-4f1e39c68f8b": 118,
     "01b74b94-82e0-4bda-9bed-7eace0292544": 70,
@@ -19153,7 +19153,7 @@
       "priority": "medium",
       "created_by": "anon-ab6221f8",
       "created_at": "2026-03-26T13:54:04.899708613Z",
-      "updated_at": "2026-09-03T13:59:58.815152487Z",
+      "updated_at": "2026-09-03T14:00:46.943676256Z",
       "closed_at": "2026-04-21T23:26:27.410852568Z",
       "labels": [
         "security"
@@ -19167,6 +19167,15 @@
           "kind": "observation",
           "signed_by": "SHA256:cx5PuRP0j7pktPKktl0WwbMp5uEwfFy9WoiBcgyhe18",
           "signature": "U1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAguEQKo5PmNONBqYSfFi6Ry6tvLy9D5GLM9YcPkF7QNdoAAAARY3Jvc3NsaW5rLWNvbW1lbnQAAAAAAAAABnNoYTUxMgAAAFMAAAALc3NoLWVkMjU1MTkAAABAwTLjajHE/CqxKxEhj1Ka6DS1cLLZzDtUpi2KOXbBdnt3r+ocFEzd32VDcv855p5FjWcslmhlzHoTYaP+6boXAQ=="
+        },
+        "20a67ba5-8e6f-454a-a4a6-596ba0e51cb4": {
+          "display_id": 1158,
+          "author": "driver",
+          "content": "[PROGRESS] state=review-launch-failed completed=two-ling-launch-attempts-failed-before-session next=await-operator-reviewer-model-choice blocker=OpenCode FileSystem.open opencode.log; no reviewer verdict and no review-agent file changes; implementation commits remain review-ready",
+          "created_at": "2026-09-03T14:00:46.936668314Z",
+          "kind": "observation",
+          "signed_by": "SHA256:cx5PuRP0j7pktPKktl0WwbMp5uEwfFy9WoiBcgyhe18",
+          "signature": "U1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAguEQKo5PmNONBqYSfFi6Ry6tvLy9D5GLM9YcPkF7QNdoAAAARY3Jvc3NsaW5rLWNvbW1lbnQAAAAAAAAABnNoYTUxMgAAAFMAAAALc3NoLWVkMjU1MTkAAABA4VVusMKRtdB1d/7VeoQlDDVJALyd6hH1ydKA5Cdb9urLHGvqDgSwMWcAsVcDLVNjgPYklYgmIU9eOzKMrMpEAw=="
         },
         "a20c33c3-4b79-411c-90b4-5d40e04d9cc7": {
           "author": "dashboard-bootstrap",
@@ -25377,11 +25386,16 @@
       "agent_id": "driver",
       "agent_seq": 52,
       "timestamp": "2026-09-03T13:59:58.815152487Z"
+    },
+    {
+      "agent_id": "driver",
+      "agent_seq": 53,
+      "timestamp": "2026-09-03T14:00:46.943676256Z"
     }
   ],
   "watermark": {
-    "timestamp": "2026-09-03T13:59:58.815152487Z",
+    "timestamp": "2026-09-03T14:00:46.943676256Z",
     "agent_id": "driver",
-    "agent_seq": 52
+    "agent_seq": 53
   }
 }

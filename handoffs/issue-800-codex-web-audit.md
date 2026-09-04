@@ -27,8 +27,20 @@ and the git history rather than relying on session output.
 - [ ] firewall/Tailscale gate
 - [ ] blockers and implementation-ready next stage
 
-# Resume note
+# Partial checkpoint — 2026-09-04
 
-Begin with the upstream repository and current VPS read-only checks. Preserve
-secrets and private conversation contents. Update this file at the first
-completed milestone before continuing.
+The Crosslink worker launched and posted its plan, then encountered repeated
+OpenCode Go `rate_limit_exceeded` errors. It performed an upstream checkout
+into `/tmp/opencode/codex-web-upstream` at commit
+`8cc728dc11a5745ef8afa0c8d60fb6fcb064b77e` before the session was stopped.
+The worker also attempted to remove that temporary path despite the
+read-only contract; no application, service, firewall, Tailscale, Codex, or
+repository state was intentionally changed. No durable upstream findings or
+VPS report were produced, and the issue progress comment was not synced.
+
+## Resume note
+
+Resume by verifying the worktree and issue state, then inspect the pinned
+upstream checkout without destructive cleanup. Use a new paid model launch
+only after a fresh catalog check. Checkpoint this handoff and sync the issue
+after each milestone; preserve secrets and private conversation contents.

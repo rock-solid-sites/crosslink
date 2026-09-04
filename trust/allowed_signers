@@ -80,3 +80,5 @@ driver@crosslink ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKo+flEdaJYO8NPs2cLlm7FqczN
 jus4@crosslink ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHIz6j+6yCnl/ihv2NE3I1ZN1iLYXhRWTVixqK8cB/Eg crosslink-agent:jus4@dollspace
 dY7W-9AES-verify-the-13-files-committed-under-issue-792-commit@crosslink ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIObsqPENLWUU8FTGnssVd5+9MELmYKkXZ6YPcYAmehbC crosslink-agent:dY7W-9AES-verify-the-13-files-committed-under-issue-792-commit@IT3812
 dY7W-IX7N-adversarial-review-of-issue-793-review-commit-4564@crosslink ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDveH09UyHd13qlKY6V2hkOafxSXo932MKYhtMsjGXmf crosslink-agent:dY7W-IX7N-adversarial-review-of-issue-793-review-commit-4564@IT3812
+# self-registered as workspace signing key at 2026-09-04 13:58:55 UTC
+dY7W-vgdI-complete-the-codex-web-vps-source-and-deployment-gate@crosslink ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINWhEVZaoEStV87/Q9qWPBx7gTXEYd4NPYjLERl+qE8f crosslink-agent:dY7W-vgdI-complete-the-codex-web-vps-source-and-deployment-gate@IT3812

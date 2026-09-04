@@ -1,5 +1,5 @@
 {
-  "next_display_id": 800,
+  "next_display_id": 801,
   "next_comment_id": 1167,
   "display_id_map": {
     "00a365a3-7b31-465a-aced-4f1e39c68f8b": 118,
@@ -269,6 +269,7 @@
     "53a437e2-55d2-47ad-befb-cd347711267e": 747,
     "54943d56-4c53-4683-8369-8095a71849da": 764,
     "562ecb52-d472-4f77-a8b3-f3aee7c21e59": 618,
+    "563f84f6-2337-4715-a425-bd8b308c40de": 800,
     "56b53269-6a34-4f77-9e2c-b9461c0657cb": 282,
     "57235bc0-132b-4184-ba86-7b1b5b20419c": 572,
     "57700273-c898-4478-80dd-dbfe76ecbcfe": 740,
@@ -8782,6 +8783,17 @@
           "signature": "U1NIU0lHAAAAAQAAAGgAAAATZWNkc2Etc2hhMi1uaXN0cDI1NgAAAAhuaXN0cDI1NgAAAEEEe0KY4l/Z7G/vfkx00kFwZtY3FjD8lde6VcPNSNT06kyL5ZUnzQGbJUMzOdlFd65s/RCzZhVJQVonLQ3yKzipGAAAABJjcm9zc2xpbmstYmFja2ZpbGwAAAAAAAAABnNoYTUxMgAAAGQAAAATZWNkc2Etc2hhMi1uaXN0cDI1NgAAAEkAAAAhANzP+8WmnX94ijWW7s55EGsggPDItJ3LmxEIVbT+TfBmAAAAIDJH6tqsseuefklR2fJ3y/NpMYLGKK5AKeo78C6CXsh+"
         }
       }
+    },
+    "563f84f6-2337-4715-a425-bd8b308c40de": {
+      "uuid": "563f84f6-2337-4715-a425-bd8b308c40de",
+      "display_id": 800,
+      "title": "codex-web VPS deployment: source gate and recovery-managed audit",
+      "description": "Question: \n\nContext: \n\nFindings: \n\nRead-only source and VPS gate audit for installing 0xcaff/codex-web as a Tailscale-only frontend using the existing authenticated Codex environment. Deliver a durable handoff with upstream source/proxy requirements, current VPS facts, blockers, and implementation gates. Recovery contract: write the report/checkpoint artifact in this repo after each milestone, post [PROGRESS] comments to this issue, run crosslink sync after each post, and leave a truthful final handoff if the session dies. No deployment changes in this phase.",
+      "status": "open",
+      "priority": "high",
+      "created_by": "driver",
+      "created_at": "2026-09-04T13:56:35.135279258Z",
+      "updated_at": "2026-09-04T13:56:35.135279258Z"
     },
     "56b53269-6a34-4f77-9e2c-b9461c0657cb": {
       "uuid": "56b53269-6a34-4f77-9e2c-b9461c0657cb",
@@ -25558,11 +25570,16 @@
       "agent_id": "driver",
       "agent_seq": 68,
       "timestamp": "2026-09-03T18:00:28.494705947Z"
+    },
+    {
+      "agent_id": "driver",
+      "agent_seq": 69,
+      "timestamp": "2026-09-04T13:56:35.135279258Z"
     }
   ],
   "watermark": {
-    "timestamp": "2026-09-03T18:00:28.494705947Z",
+    "timestamp": "2026-09-04T13:56:35.135279258Z",
     "agent_id": "driver",
-    "agent_seq": 68
+    "agent_seq": 69
   }
 }

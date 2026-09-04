@@ -8793,8 +8793,9 @@
       "priority": "high",
       "created_by": "driver",
       "created_at": "2026-09-04T13:56:35.135279258Z",
-      "updated_at": "2026-09-04T13:56:35.469098941Z",
+      "updated_at": "2026-09-04T13:56:35.783316635Z",
       "labels": [
+        "codex-web",
         "research"
       ]
     },
@@ -25583,11 +25584,16 @@
       "agent_id": "driver",
       "agent_seq": 70,
       "timestamp": "2026-09-04T13:56:35.469098941Z"
+    },
+    {
+      "agent_id": "driver",
+      "agent_seq": 71,
+      "timestamp": "2026-09-04T13:56:35.783316635Z"
     }
   ],
   "watermark": {
-    "timestamp": "2026-09-04T13:56:35.469098941Z",
+    "timestamp": "2026-09-04T13:56:35.783316635Z",
     "agent_id": "driver",
-    "agent_seq": 70
+    "agent_seq": 71
   }
 }

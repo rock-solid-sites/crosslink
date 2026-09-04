@@ -1,6 +1,6 @@
 {
   "next_display_id": 801,
-  "next_comment_id": 1167,
+  "next_comment_id": 1168,
   "display_id_map": {
     "00a365a3-7b31-465a-aced-4f1e39c68f8b": 118,
     "01b74b94-82e0-4bda-9bed-7eace0292544": 70,
@@ -8793,11 +8793,22 @@
       "priority": "high",
       "created_by": "driver",
       "created_at": "2026-09-04T13:56:35.135279258Z",
-      "updated_at": "2026-09-04T13:56:35.783316635Z",
+      "updated_at": "2026-09-04T13:59:57.567225160Z",
       "labels": [
         "codex-web",
         "research"
-      ]
+      ],
+      "comments": {
+        "3bd58c8a-0d77-4c58-abd9-e0721bdcb6a9": {
+          "display_id": 1167,
+          "author": "dY7W-vgdI-complete-the-codex-web-vps-source-and-deployment-gate",
+          "content": "Plan: (1) fetch upstream 0xcaff/codex-web at pinned commit — record README install/build, server entrypoint/flags, codex_remote_proxy impl+deps, Unix-socket env vars, subagent support, caveats; (2) read-only VPS checks via elevated read-only commands only — codex binary/version + redacted auth presence, HOME/CODEX_HOME/PATH, repo root/perms, node/npm/git/websocat, app-server proc/socket/ownership, systemd conventions, listeners incl 8214, Tailscale Serve, firewall; skip anything needing maintenance window; (3) reconcile managed app-server vs proposed arch (no second server), then durable handoff final report with pass/fail gate, blockers, service paths, smallest safe next action. Handoff updated+committed per milestone with [PROGRESS]+sync.",
+          "created_at": "2026-09-04T13:59:57.561113007Z",
+          "kind": "plan",
+          "signed_by": "SHA256:nYsM0IvJc5E7UXUZbAsy77gnxe91r6t/qV1FKTIynf8",
+          "signature": "U1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAg1aERVlqgRK1Xzv9D2pY8HHuBNcRh3g09iMsRGX6oTx8AAAARY3Jvc3NsaW5rLWNvbW1lbnQAAAAAAAAABnNoYTUxMgAAAFMAAAALc3NoLWVkMjU1MTkAAABAcVdNPFSZsXfWg9qGJpnZ7vfqEdVebj/LXJkEaYTe2SceCkyJX/ervXIfrhFMJCrkrL3r+0dX8UjakLDM+PakAw=="
+        }
+      }
     },
     "56b53269-6a34-4f77-9e2c-b9461c0657cb": {
       "uuid": "56b53269-6a34-4f77-9e2c-b9461c0657cb",
@@ -25604,11 +25615,16 @@
       "agent_id": "dY7W-vgdI-complete-the-codex-web-vps-source-and-deployment-gate",
       "agent_seq": 2,
       "timestamp": "2026-09-04T13:59:27.682075552Z"
+    },
+    {
+      "agent_id": "dY7W-vgdI-complete-the-codex-web-vps-source-and-deployment-gate",
+      "agent_seq": 3,
+      "timestamp": "2026-09-04T13:59:57.567225160Z"
     }
   ],
   "watermark": {
-    "timestamp": "2026-09-04T13:59:27.682075552Z",
+    "timestamp": "2026-09-04T13:59:57.567225160Z",
     "agent_id": "dY7W-vgdI-complete-the-codex-web-vps-source-and-deployment-gate",
-    "agent_seq": 2
+    "agent_seq": 3
   }
 }

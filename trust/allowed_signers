@@ -81,3 +81,5 @@ jus4@crosslink ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHIz6j+6yCnl/ihv2NE3I1ZN1iLYX
 dY7W-9AES-verify-the-13-files-committed-under-issue-792-commit@crosslink ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIObsqPENLWUU8FTGnssVd5+9MELmYKkXZ6YPcYAmehbC crosslink-agent:dY7W-9AES-verify-the-13-files-committed-under-issue-792-commit@IT3812
 dY7W-IX7N-adversarial-review-of-issue-793-review-commit-4564@crosslink ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDveH09UyHd13qlKY6V2hkOafxSXo932MKYhtMsjGXmf crosslink-agent:dY7W-IX7N-adversarial-review-of-issue-793-review-commit-4564@IT3812
 dY7W-vgdI-complete-the-codex-web-vps-source-and-deployment-gate@crosslink ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINWhEVZaoEStV87/Q9qWPBx7gTXEYd4NPYjLERl+qE8f crosslink-agent:dY7W-vgdI-complete-the-codex-web-vps-source-and-deployment-gate@IT3812
+# self-registered as workspace signing key at 2026-09-05 11:11:07 UTC
+dY7W-PO8C-resume-issue-800-from-the-previous-committed-b4ea@crosslink ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGJiX5HYQo1E2luhnLLGr5RzNf9NfHVicT7FGOGp2eHc crosslink-agent:dY7W-PO8C-resume-issue-800-from-the-previous-committed-b4ea@IT3812

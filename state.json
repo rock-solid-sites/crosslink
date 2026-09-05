@@ -13253,7 +13253,10 @@
       "parent_uuid": "563f84f6-2337-4715-a425-bd8b308c40de",
       "created_by": "driver",
       "created_at": "2026-09-05T11:41:14.166662782Z",
-      "updated_at": "2026-09-05T11:41:14.166662782Z"
+      "updated_at": "2026-09-05T11:41:14.505985969Z",
+      "labels": [
+        "feature"
+      ]
     },
     "80ad31a2-f530-4c38-8ff7-bd75be6ffda6": {
       "uuid": "80ad31a2-f530-4c38-8ff7-bd75be6ffda6",
@@ -25746,11 +25749,16 @@
       "agent_id": "driver",
       "agent_seq": 66,
       "timestamp": "2026-09-05T11:41:14.166662782Z"
+    },
+    {
+      "agent_id": "driver",
+      "agent_seq": 67,
+      "timestamp": "2026-09-05T11:41:14.505985969Z"
     }
   ],
   "watermark": {
-    "timestamp": "2026-09-05T11:41:14.166662782Z",
+    "timestamp": "2026-09-05T11:41:14.505985969Z",
     "agent_id": "driver",
-    "agent_seq": 66
+    "agent_seq": 67
   }
 }

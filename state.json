@@ -962,10 +962,6 @@
     "792": {
       "agent_id": "dY7W-9AES-verify-the-13-files-committed-under-issue-792-commit",
       "claimed_at": "2026-07-31T19:36:04.186730618Z"
-    },
-    "800": {
-      "agent_id": "dY7W-PO8C-resume-issue-800-from-the-previous-committed-b4ea",
-      "claimed_at": "2026-09-05T11:11:52.211145056Z"
     }
   },
   "issues": {
@@ -25713,11 +25709,16 @@
       "agent_id": "dY7W-PO8C-resume-issue-800-from-the-previous-committed-b4ea",
       "agent_seq": 5,
       "timestamp": "2026-09-05T11:14:48.001095582Z"
+    },
+    {
+      "agent_id": "dY7W-PO8C-resume-issue-800-from-the-previous-committed-b4ea",
+      "agent_seq": 6,
+      "timestamp": "2026-09-05T11:14:56.828236028Z"
     }
   ],
   "watermark": {
-    "timestamp": "2026-09-05T11:14:48.001095582Z",
+    "timestamp": "2026-09-05T11:14:56.828236028Z",
     "agent_id": "dY7W-PO8C-resume-issue-800-from-the-previous-committed-b4ea",
-    "agent_seq": 5
+    "agent_seq": 6
   }
 }

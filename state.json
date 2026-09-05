@@ -1,5 +1,5 @@
 {
-  "next_display_id": 801,
+  "next_display_id": 802,
   "next_comment_id": 1175,
   "display_id_map": {
     "00a365a3-7b31-465a-aced-4f1e39c68f8b": 118,
@@ -404,6 +404,7 @@
     "7f7a6289-9c3f-47f0-9152-2624876037f8": 145,
     "7fd0b284-d604-4e84-9f19-858cdc2baa51": 501,
     "7fe14202-e3f5-48a9-9233-0aa6d97efbbf": 446,
+    "800626ae-e6cd-4045-9f22-c9b6b8b5eeed": 801,
     "80ad31a2-f530-4c38-8ff7-bd75be6ffda6": 215,
     "80b4dd77-03a3-49cd-8d56-43d4f6a3746c": 283,
     "80c53e44-4daa-44df-ae2e-a953397c1c50": 297,
@@ -13242,6 +13243,18 @@
         "enhancement"
       ]
     },
+    "800626ae-e6cd-4045-9f22-c9b6b8b5eeed": {
+      "uuid": "800626ae-e6cd-4045-9f22-c9b6b8b5eeed",
+      "display_id": 801,
+      "title": "codex-web Phase 2: install persistent Tailscale-only deployment",
+      "description": "Goal: \n\nAcceptance criteria:\n- \n\nImplement the codex-web deployment based on audit issue #800 and commit 54b7a055. Authorized scope: install the pinned upstream codex-web outside project repositories; install only reviewed missing dependencies such as websocat; resolve the upstream Linux asset/build requirement without guessing; create persistent separate app-server and frontend services using the existing authenticated Codex state and existing systemd-user/linger convention; keep codex-web loopback-only; expose only through Tailscale Serve; do not open public port 8214 or weaken firewall rules. Do not adopt or stop the existing managed code-mode app-server; use a dedicated socket and verify identity/state isolation. Checkpoint every meaningful boundary in handoff and git, post [PROGRESS] comments, and run crosslink sync. Validate local health, service restart separation, public closure, projects/threads/subagents where possible. Do not claim phone validation while the phone peer is offline. If a required source detail, privilege, or live validation is unavailable, stop with a durable blocker and exact operator command; preserve rollback paths and never use destructive cleanup.",
+      "status": "open",
+      "priority": "high",
+      "parent_uuid": "563f84f6-2337-4715-a425-bd8b308c40de",
+      "created_by": "driver",
+      "created_at": "2026-09-05T11:41:14.166662782Z",
+      "updated_at": "2026-09-05T11:41:14.166662782Z"
+    },
     "80ad31a2-f530-4c38-8ff7-bd75be6ffda6": {
       "uuid": "80ad31a2-f530-4c38-8ff7-bd75be6ffda6",
       "display_id": 215,
@@ -25728,11 +25741,16 @@
       "agent_id": "dY7W-PO8C-resume-issue-800-from-the-previous-committed-b4ea",
       "agent_seq": 7,
       "timestamp": "2026-09-05T11:15:02.817224755Z"
+    },
+    {
+      "agent_id": "driver",
+      "agent_seq": 66,
+      "timestamp": "2026-09-05T11:41:14.166662782Z"
     }
   ],
   "watermark": {
-    "timestamp": "2026-09-05T11:15:02.817224755Z",
-    "agent_id": "dY7W-PO8C-resume-issue-800-from-the-previous-committed-b4ea",
-    "agent_seq": 7
+    "timestamp": "2026-09-05T11:41:14.166662782Z",
+    "agent_id": "driver",
+    "agent_seq": 66
   }
 }

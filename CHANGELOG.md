@@ -8,6 +8,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- State broker transport adapter: optional broker-backed durable state through
+  the deployed `crosslink-state-broker` contract v1, behind a narrow
+  `ProjectStateTransport` seam. Supports state/head reads, blob hydration into
+  disposable projections, expected-head/CAS commits with typed `stale_state`
+  reconciliation, and read-back verification. Backend selection is explicit
+  (`CROSSLINK_STATE_BACKEND=broker` or `"state_backend": "broker"`); the default
+  local/direct git behavior is unchanged. The bearer token is read from the
+  environment (or a token file) and is never printed or persisted. New
+  read-only command: `crosslink state-broker status`. See
+  `.design/state-broker-transport.md` (#802).
+
 - `crosslink migrate hub-v3 --remigrate-from-v2` - regenerates the v3 genesis
   from the current `crosslink/hub` (v2) tip and force-pushes it, superseding a
   stale remote v3 hub. The discoverable recovery path when a v2-only binary

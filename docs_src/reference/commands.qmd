@@ -281,6 +281,26 @@ Top-level shortcuts exist for common commands: `create`, `quick`, `list`, `show`
 
 &nbsp;
 
+## State broker (durable central state)
+
+Optional integration with the deployed `crosslink-state-broker`. The default
+backend is Crosslink's existing local/direct git behavior; the broker is
+selected explicitly and never enabled implicitly by broker environment
+variables.
+
+| Command | Description |
+|---------|-------------|
+| `crosslink state-broker status` | Show the selected backend and the durable project-state head (read-only) |
+| `crosslink state-broker status --json` | Machine-readable backend/status report |
+
+Selection: `CROSSLINK_STATE_BACKEND=broker`, or `"state_backend": "broker"` in
+`.crosslink/hook-config.json`. Broker settings: `CROSSLINK_STATE_BROKER_URL`,
+`CROSSLINK_STATE_BROKER_TOKEN` (or `CROSSLINK_STATE_BROKER_TOKEN_FILE`), and
+`CROSSLINK_STATE_PROJECT_UUID`. The bearer token is never printed or persisted.
+See `.design/state-broker-transport.md`.
+
+&nbsp;
+
 ## Migration
 
 | Command | Description |

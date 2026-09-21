@@ -351,6 +351,13 @@ disposition and evidence: `handoffs/802-hardening.md`. Summary:
 - unused public surface removed (`BrokerErrorCode::ALL`,
   `StateBackend::into_broker`, `transport_from_env`, `StateBlob::text`).
 
+Hardening evidence (final run): `cargo test --lib state_broker` 71 passed;
+`cargo test --bin crosslink state_broker` 72 passed; full library 1884 passed;
+full bin suite 2944 passed (53 filtered: proptest + the pre-existing
+`agents_hygiene` flake); `cli_integration` 199 passed;
+`state_broker_contract` 15 passed (real HTTP over loopback). The deployed
+read-only smoke is `handoffs/802-live-smoke.md`.
+
 ## 8. Next step: live verification (after the Codex Cloud durability experiment passes)
 
 1. Operator places the broker token on the machine, e.g.

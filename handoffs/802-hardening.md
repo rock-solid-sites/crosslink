@@ -3,7 +3,7 @@ issue: 802
 title: Decision-independent hardening from the clean-room review panel
 status: complete
 branch: fix/pp3g-802-decision-independent-hardening
-base: feature/pp3g-state-broker-adapter @ cf0902986 (includes ADR-802)
+base: feature/pp3g-state-broker-adapter @ 48b503ec6 (includes ADR-802 and the live-smoke record)
 date: 2026-09-21
 scope: |
   Only the review findings that do not depend on the deferred per-agent-ref /
@@ -115,23 +115,46 @@ mismatch, `upstream_error`-on-write classification, and the
 
 ## 6. Test results
 
-See §7 for the exact command transcript. Summary (final run, this branch):
+Final run (code tree of commit `6a92d6942`, identical to the rebased tip's
+`crosslink/` tree):
 
 | Command | Result |
 |---|---|
 | `cargo test --lib state_broker` | 71 passed, 0 failed |
+| `cargo test --bin crosslink state_broker` | 72 passed, 0 failed |
 | `cargo test --lib` (full library) | 1884 passed, 0 failed |
-| `cargo test --bin crosslink -- --skip proptest --skip agents_hygiene` | see §7 |
-| `cargo test --test state_broker_contract` | 15 passed, 0 failed |
-| `cargo test --test cli_integration` | see §7 |
-| `cargo test --test state_broker_live` | 1 ignored (live probe; zero writes) |
-| `cargo clippy --lib --bins --tests` | no warnings from `state_broker` except the pre-existing `needless_pass_by_value` on the command dispatcher |
+| `cargo test --bin crosslink -- --skip proptest --skip agents_hygiene` (full bin suite) | 2944 passed, 0 failed, 53 filtered |
+| `cargo test --test cli_integration` (full CLI suite) | 199 passed, 0 failed |
+| `cargo test --test state_broker_contract` | 15 passed, 0 failed (real HTTP over 127.0.0.1) |
+| `cargo test --test state_broker_live` | 0 run, 1 ignored (live probe; requires operator env) |
+| `cargo clippy --lib --bins --tests` | no warnings from `state_broker` except the pre-existing `needless_pass_by_value` on the command dispatcher (same pattern as other command modules) |
 | `rustfmt --edition 2021 --check` on touched files | clean |
+
+The full bin suite was run with `--skip proptest --skip agents_hygiene`,
+matching the branch's documented practice (proptest runs in a dedicated job;
+`agents_hygiene` is the pre-existing parallelism flake filed as #803).
+
+An independent live read-only smoke against the deployed broker
+(`handoffs/802-live-smoke.md`, base-branch commit `48b503ec6`) inspected an
+earlier commit of this branch and rated the ADR §17 hardening gates: 6
+satisfied, 2 partial (projection-disjointness/call-site enforcement; per-read
+rather than at-construction identity binding), 1 unresolved (journal
+high-water-mark check in `hub_v3.rs`, outside this change). No live write was
+performed.
 
 ## 7. Line-count change
 
 Relative to the base branch tip (`feature/pp3g-state-broker-adapter` @
-`cf0902986`): see the final commit message / `git diff --stat <base>...HEAD`.
+`48b503ec6`):
+
+```
+13 files changed, 3169 insertions(+), 436 deletions(-)   (net +2733)
+```
+
+Breakdown by area: production logic/API ≈ +1,000; new `projection.rs` ≈ +545
+(including its unit tests); test suites ≈ +1,100; design doc/handoff/CHANGELOG
+≈ +200; the rest is moved/rewritten documentation inside the touched modules.
+The base adapter branch itself remains +5515/−1 against `main`.
 
 ## 8. Remaining architectural blockers before `SyncManager` wiring
 

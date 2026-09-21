@@ -1,0 +1,35 @@
+{
+  "expected_model": "opencode-go/qwen3.8-flash",
+  "session_id": "ses_f3ba5f547ffe10x4i5WHsCdOzR",
+  "steps": 18,
+  "tokens": {
+    "input": 102,
+    "output": 7316,
+    "reasoning": 0,
+    "cache_read": 1139387,
+    "cache_write": 144272
+  },
+  "cost_usd": 0.0505,
+  "finish_reasons": [
+    "tool-calls",
+    "tool-calls",
+    "tool-calls",
+    "tool-calls",
+    "tool-calls",
+    "tool-calls",
+    "tool-calls",
+    "tool-calls",
+    "tool-calls",
+    "tool-calls",
+    "tool-calls",
+    "tool-calls",
+    "tool-calls",
+    "tool-calls",
+    "tool-calls",
+    "tool-calls",
+    "tool-calls",
+    "unknown"
+  ],
+  "extraction": "text parts",
+  "report_chars": 86
+}

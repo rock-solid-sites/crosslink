@@ -1,0 +1,95 @@
+{
+  "attempt1": {
+    "steps": 20,
+    "tokens": {
+      "input": 244848,
+      "output": 849,
+      "reasoning": 0,
+      "cache_read": 1420288,
+      "cache_write": 0
+    },
+    "cost_usd": 0.0798,
+    "finish_reasons": [
+      "tool-calls",
+      "tool-calls",
+      "tool-calls",
+      "tool-calls",
+      "tool-calls",
+      "tool-calls",
+      "tool-calls",
+      "tool-calls",
+      "tool-calls",
+      "tool-calls",
+      "tool-calls",
+      "tool-calls",
+      "tool-calls",
+      "tool-calls",
+      "tool-calls",
+      "tool-calls",
+      "tool-calls",
+      "tool-calls",
+      "tool-calls",
+      "unknown"
+    ]
+  },
+  "attempt2": {
+    "steps": 22,
+    "tokens": {
+      "input": 165034,
+      "output": 1010,
+      "reasoning": 0,
+      "cache_read": 1479168,
+      "cache_write": 0
+    },
+    "cost_usd": 0.0696,
+    "finish_reasons": [
+      "tool-calls",
+      "tool-calls",
+      "tool-calls",
+      "tool-calls",
+      "tool-calls",
+      "tool-calls",
+      "tool-calls",
+      "tool-calls",
+      "tool-calls",
+      "tool-calls",
+      "tool-calls",
+      "tool-calls",
+      "tool-calls",
+      "tool-calls",
+      "tool-calls",
+      "tool-calls",
+      "tool-calls",
+      "tool-calls",
+      "tool-calls",
+      "tool-calls",
+      "tool-calls",
+      "unknown"
+    ]
+  },
+  "continuation": {
+    "steps": 1,
+    "tokens": {
+      "input": 150963,
+      "output": 10960,
+      "reasoning": 0,
+      "cache_read": 0,
+      "cache_write": 0
+    },
+    "cost_usd": 0.0281,
+    "finish_reasons": [
+      "stop"
+    ]
+  },
+  "total": {
+    "tokens": {
+      "input": 560845,
+      "output": 12819,
+      "reasoning": 0,
+      "cache_read": 2899456,
+      "cache_write": 0
+    },
+    "cost_usd": 0.1775,
+    "attempt3": "default format; token accounting unavailable"
+  }
+}

@@ -77,10 +77,49 @@ copies; no reviewer session is continued into another.
 
 # Status
 
-- [ ] reviewer-1 Hy3 — dispatched
-- [ ] reviewer-2 Qwen 3.8 Flash — dispatched
-- [ ] reviewer-3 GLM-5.3-Flash — dispatched
-- [ ] synthesis — blocked on all three
+- [x] reviewer-1 Hy3 — complete, exit 0, single attempt
+      (8694 chars; 164,142 in / 3,216 out / 693,568 cache-read; $0.0491)
+- [x] reviewer-2 Qwen 3.8 Flash — complete after recovery
+      (attempt 1 emitted a 9,243-char report truncated mid-sentence; attempt 2
+      emitted only an 86-char preamble; the complete report was assembled from
+      attempt 1 plus a same-session continuation of attempt 1 that finished the
+      remaining sections: 16,589 chars total; combined 132 in / 11,587 out /
+      1,618,509 cache-read / 165,876 cache-write; $0.1116)
+- [x] reviewer-3 GLM-5.3-Flash — complete after recovery
+      (attempts 1–3 each read the full packet but emitted no assistant text;
+      the report was produced by a same-session continuation of attempt 2 with
+      the evidence already in context: 12,329 chars; combined 560,845 in /
+      12,819 out / 2,899,456 cache-read; $0.1775; attempt 3 ran under
+      `--format default` and its token accounting is unavailable)
+- [x] synthesis — `99-synthesis.md`
 
-No reviewer saw another review before submitting. No live broker operation is
-performed. No repository file is modified by any reviewer.
+Total panel cost: $0.3382 across the three reviewers (all OpenCode Go, all
+attempts included).
+
+# Execution history (failures and recoveries)
+
+| Reviewer | Attempt | Mechanism | Outcome |
+|---|---|---|---|
+| Hy3 | 1 | `--format json`, high | complete report |
+| Qwen | 1 | `--format json`, xhigh | report emitted, truncated mid-sentence |
+| Qwen | 2 | `--format json`, xhigh, concise instruction | preamble only |
+| Qwen | 1-cont | `--session` continuation of attempt 1 | completed the report |
+| GLM | 1 | `--format json`, high | no assistant text (23 reads) |
+| GLM | 2 | `--format json`, high, retry | no assistant text (27 reads) |
+| GLM | 3 | `--format default`, high (operator-approved) | no assistant text (23 reads) |
+| GLM | 2-cont | `--session` continuation of attempt 2 | complete report (`reason: stop`) |
+
+Failure policy applied as frozen: one same-model retry before any substitution;
+no substitution was made; both recoveries were same-model, same-task,
+same-session continuations, so no reviewer saw any other reviewer's output and
+no clean-room boundary was crossed. Raw event streams for every attempt remain
+under `/tmp/opencode/review-cdp1/reviewer-N/` (`out*.jsonl`, `out-default.txt`,
+`review-attempt*.md`, `meta*`, `exit*`).
+
+Raw reviewer outputs: `01-…`–`03-…` in this directory; usage JSON under
+`usage/`. Packet aggregate content hash:
+`16e66c7864324f9e6685140919c9fde8085efcaa9c6ee67b6d393fa09c08db6b`.
+
+No reviewer saw another review before submitting. No live broker operation was
+performed. No repository file was modified by any reviewer (all three packet
+copies re-hashed to the frozen value after the runs).

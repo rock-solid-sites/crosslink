@@ -204,6 +204,17 @@ impl StateBrokerError {
         Self::client(BrokerErrorCode::Protocol, message.into())
     }
 
+    /// Client-side protocol failure carrying structured details.
+    ///
+    /// Used by CDP-1 validation, which records a stable `details.defect` label.
+    #[must_use]
+    pub fn protocol_with_details(message: impl Into<String>, details: Option<Value>) -> Self {
+        Self {
+            details,
+            ..Self::client(BrokerErrorCode::Protocol, message.into())
+        }
+    }
+
     /// Client-side input rejection mirroring the broker's limits.
     #[must_use]
     pub fn invalid_input(message: impl Into<String>) -> Self {

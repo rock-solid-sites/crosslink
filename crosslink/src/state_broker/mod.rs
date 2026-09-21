@@ -47,6 +47,7 @@
 //! only to the configured broker host.
 
 pub mod client;
+pub mod cdp1;
 pub mod config;
 pub mod digest;
 pub mod error;

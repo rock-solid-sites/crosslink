@@ -55,6 +55,13 @@ struct MockState {
     fail_next_read_state: VecDeque<StateBrokerError>,
     /// Queue of injected `read_blob` failures, consumed one per call.
     fail_next_read_blob: VecDeque<StateBrokerError>,
+    /// Queue of errors returned *after* a commit has already landed (lost
+    /// response simulation), consumed one per commit call.
+    fail_after_landing: VecDeque<StateBrokerError>,
+    /// Number of read operations served (read_state/read_blob/verify).
+    read_calls: u64,
+    /// Number of commit attempts (landed or failed).
+    commit_attempts: u64,
 }
 
 impl MockStateTransport {
@@ -72,6 +79,9 @@ impl MockStateTransport {
                 fail_next: VecDeque::new(),
                 fail_next_read_state: VecDeque::new(),
                 fail_next_read_blob: VecDeque::new(),
+                fail_after_landing: VecDeque::new(),
+                read_calls: 0,
+                commit_attempts: 0,
             })),
         }
     }
@@ -183,6 +193,62 @@ impl MockStateTransport {
         self.lock().fail_next_read_blob.push_back(error);
     }
 
+    /// Inject an error returned *after* the next commit lands (lost response).
+    pub fn fail_next_commit_after_landing(&self, error: StateBrokerError) {
+        self.lock().fail_after_landing.push_back(error);
+    }
+
+    /// Add or replace a file in the *live* map only, leaving the head commit
+    /// snapshot untouched (fault injection: inventory↔blob mismatch).
+    pub fn upsert_file<P: Into<String>, B: AsRef<[u8]>>(&self, path: P, bytes: B) {
+        let mut state = self.lock();
+        state.files.insert(path.into(), bytes.as_ref().to_vec());
+    }
+
+    /// Corrupt a file in the head commit snapshot *and* the live map, so the
+    /// inventory and the blob agree but the bytes are wrong.
+    pub fn corrupt_file<P: Into<String>, B: AsRef<[u8]>>(&self, path: P, bytes: B) {
+        let mut state = self.lock();
+        let path = path.into();
+        let bytes = bytes.as_ref().to_vec();
+        state.files.insert(path.clone(), bytes.clone());
+        if let Some(head) = state.head.clone() {
+            if let Some(snapshot) = state.history.get_mut(&head) {
+                snapshot.files.insert(path, bytes);
+            }
+        }
+    }
+
+    /// Remove a file from the head commit snapshot and the live map (fault
+    /// injection only; the real broker has no delete).
+    pub fn remove_file(&self, path: &str) {
+        let mut state = self.lock();
+        state.files.remove(path);
+        if let Some(head) = state.head.clone() {
+            if let Some(snapshot) = state.history.get_mut(&head) {
+                snapshot.files.remove(path);
+            }
+        }
+    }
+
+    /// Number of commit attempts (landed or failed).
+    #[must_use]
+    pub fn commit_attempts(&self) -> u64 {
+        self.lock().commit_attempts
+    }
+
+    /// Number of read operations served.
+    #[must_use]
+    pub fn read_calls(&self) -> u64 {
+        self.lock().read_calls
+    }
+
+    /// Number of delete operations served (always zero: broker v1 has none).
+    #[must_use]
+    pub fn delete_calls(&self) -> u64 {
+        0
+    }
+
     /// Simulate a competing writer landing a commit before our next CAS
     /// attempt: upserts `files` and moves the head without any CAS check.
     /// Returns the synthetic commit sha.
@@ -237,6 +303,7 @@ impl MockStateTransport {
 impl ProjectStateTransport for MockStateTransport {
     fn read_state(&self) -> Result<ProjectState, StateBrokerError> {
         let mut state = self.lock();
+        state.read_calls += 1;
         if let Some(error) = state.fail_next_read_state.pop_front() {
             return Err(error);
         }
@@ -379,6 +446,7 @@ impl ProjectStateTransport for MockStateTransport {
     fn commit(&self, request: &CommitRequest) -> Result<CommitOutcome, StateBrokerError> {
         request.validate()?;
         let mut state = self.lock();
+        state.commit_attempts += 1;
         if let Some(error) = state.fail_next.pop_front() {
             return Err(error);
         }
@@ -432,6 +500,9 @@ impl ProjectStateTransport for MockStateTransport {
                 files: snapshot,
             },
         );
+        if let Some(error) = state.fail_after_landing.pop_front() {
+            return Err(error);
+        }
         Ok(CommitOutcome {
             state_ref: format!("refs/heads/projects/{}/state", state.project_uuid),
             commit: commit.clone(),

@@ -734,6 +734,17 @@ pub(crate) fn reconcile(
                 Ok(false) => ReconcileVerdict::NotLanded {
                     observed_head: Some(head.commit.clone()),
                 },
+                Err(error)
+                    if error.code() == crate::state_broker::BrokerErrorCode::NotFound =>
+                {
+                    // The carried commit is not readable: the broker never
+                    // attached it, so nothing of ours landed. Re-classifying
+                    // the current head is safe (a landed-but-unreadable commit
+                    // would carry our trailer and be seen there).
+                    ReconcileVerdict::NotLanded {
+                        observed_head: Some(head.commit.clone()),
+                    }
+                }
                 Err(error) => ReconcileVerdict::Unknown {
                     detail: format!(
                         "cannot verify the carried commit {carried}: {}",

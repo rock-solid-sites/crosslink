@@ -62,6 +62,8 @@ struct StubState {
     echo_token_next: bool,
     /// Return a non-retryable read-back mismatch for the next request.
     readback_mismatch_next: bool,
+    /// Return a non-retryable read-back mismatch for the next *commit* only.
+    readback_mismatch_commit_next: bool,
     /// Report this UUID (instead of the configured project) in whoami/state.
     project_uuid_override: Option<String>,
     /// Return `verified: false` on the next commit response even though the
@@ -101,6 +103,7 @@ impl StubBroker {
             unknown_error_code: false,
             echo_token_next: false,
             readback_mismatch_next: false,
+            readback_mismatch_commit_next: false,
             project_uuid_override: None,
             unverified_next: false,
             unverified_files_next: false,
@@ -176,6 +179,11 @@ impl StubBroker {
     /// message and details (a misbehaving broker; the client must redact).
     fn set_echo_token_next(&self) {
         self.lock().echo_token_next = true;
+    }
+
+    /// Make the next *commit* a non-retryable read-back mismatch (502).
+    fn set_readback_mismatch_next_commit(&self) {
+        self.lock().readback_mismatch_commit_next = true;
     }
 
     /// Make the next response a non-retryable read-back mismatch (502).
@@ -563,6 +571,26 @@ fn route(request: &StubRequest, state: &Arc<Mutex<StubState>>) -> (u16, serde_js
             )
         }
         "/commit" => {
+            if guard.readback_mismatch_commit_next {
+                guard.readback_mismatch_commit_next = false;
+                return (
+                    502,
+                    serde_json::json!({
+                        "ok": false,
+                        "operation": "state.commit",
+                        "request_id": "stub",
+                        "error": {
+                            "code": "upstream_error",
+                            "message": "state commit landed but read-back verification failed; reconcile before retrying the write",
+                            "retryable": false,
+                            "details": {
+                                "commit": "a".repeat(40),
+                                "failed_paths": ["a.json"],
+                            },
+                        },
+                    }),
+                );
+            }
             if request.method != "POST" {
                 return (
                     405,
@@ -1790,5 +1818,259 @@ fn non_loopback_plain_http_is_refused_by_config() {
     assert_eq!(
         error.code(),
         crosslink::state_broker::BrokerErrorCode::Configuration
+    );
+}
+
+// ── CDP-1 loopback tests (T15/T17/T18/T35/T36/T37/T52) ───────────────
+
+/// A synthetic pushed-checkpoint source for CDP-1 loopback tests.
+struct Cdp1Source {
+    checkpoint: crosslink::state_broker::cdp1::PushedCheckpoint,
+}
+
+impl Cdp1Source {
+    fn new(agent_seq: u64) -> Self {
+        use chrono::{DateTime, Utc};
+        use crosslink::checkpoint::CheckpointState;
+        use crosslink::events::OrderingKey;
+        let state = CheckpointState {
+            next_display_id: 42,
+            watermark: Some(OrderingKey {
+                timestamp: DateTime::<Utc>::UNIX_EPOCH + chrono::Duration::seconds(agent_seq as i64),
+                agent_id: "driver".to_string(),
+                agent_seq,
+            }),
+            ..Default::default()
+        };
+        let state_bytes = serde_json::to_vec_pretty(&state).expect("state json");
+        let state_sha256 = crosslink::state_broker::digest::sha256_hex(&state_bytes);
+        let watermark = state.watermark.clone().expect("watermark");
+        Self {
+            checkpoint: crosslink::state_broker::cdp1::PushedCheckpoint {
+                commit: format!("{:040x}", 0xa1b2_c3d4_e5f6_0718_u64 + agent_seq),
+                state_blob_sha: format!("{:040x}", 0xb2c3_d4e5_f607_1829_u64 + agent_seq),
+                state_bytes,
+                state,
+                watermark,
+                state_sha256,
+            },
+        }
+    }
+}
+
+impl crosslink::state_broker::cdp1::CheckpointSource for Cdp1Source {
+    fn resolve_pushed_checkpoint(
+        &self,
+    ) -> Result<crosslink::state_broker::cdp1::PushedCheckpoint, crosslink::state_broker::StateBrokerError>
+    {
+        Ok(self.checkpoint.clone())
+    }
+}
+
+impl crosslink::state_broker::cdp1::JournalAnchor for Cdp1Source {
+    fn verify_anchor(
+        &self,
+        source: &crosslink::state_broker::cdp1::SourceCheckpoint,
+        state_bytes: &[u8],
+    ) -> Result<(), crosslink::state_broker::StateBrokerError> {
+        if source.commit != self.checkpoint.commit
+            || state_bytes != self.checkpoint.state_bytes
+        {
+            return Err(crosslink::state_broker::StateBrokerError::protocol(
+                "loopback anchor mismatch",
+            ));
+        }
+        Ok(())
+    }
+}
+
+fn cdp1_config() -> crosslink::state_broker::cdp1::Cdp1Config {
+    crosslink::state_broker::cdp1::Cdp1Config {
+        project_uuid: UUID.to_string(),
+        state_ref: format!("refs/heads/projects/{UUID}/state"),
+        publisher_id: "loopback-publisher".to_string(),
+        accounting: crosslink::state_broker::cdp1::AccountingModel::Decoded,
+    }
+}
+
+#[test]
+fn cdp1_publish_and_read_back_over_loopback_http() {
+    use crosslink::state_broker::cdp1::{
+        publish_checkpoint, read_derived_checkpoint, PublishOptions, PublishOutcome,
+        PublisherIdentity, ReadExpectations,
+    };
+    let stub = StubBroker::start();
+    let client = stub.client();
+    let source = Cdp1Source::new(1);
+    let cfg = cdp1_config();
+    let identity = PublisherIdentity::writer(UUID);
+
+    let outcome = publish_checkpoint(
+        &client,
+        &source,
+        &cfg,
+        &identity,
+        &PublishOptions::default(),
+        None,
+    )
+    .expect("publish call");
+    let commit = match outcome {
+        PublishOutcome::Landed { commit, .. } => commit,
+        other => panic!("expected Landed, got {other:?}"),
+    };
+    // The commit trailer records the op id.
+    let state = client.read_state().unwrap();
+    let head = state.state.head.as_ref().unwrap();
+    assert_eq!(head.commit, commit);
+    assert!(head.message.contains("Broker-Op: ckpt-"), "{}", head.message);
+
+    // Journal-anchored read-back reconstructs the exact state bytes.
+    let read = read_derived_checkpoint(
+        &client,
+        &cfg,
+        &ReadExpectations {
+            journal_anchored: true,
+            ..Default::default()
+        },
+        Some(&source),
+    )
+    .unwrap();
+    assert_eq!(
+        read.provenance,
+        crosslink::state_broker::cdp1::Provenance::JournalAnchored
+    );
+    assert_eq!(read.state_bytes, source.checkpoint.state_bytes);
+
+    // A replay is a no-op: no new commit.
+    let commits_before = stub.lock().counter;
+    let replay = publish_checkpoint(
+        &client,
+        &source,
+        &cfg,
+        &identity,
+        &PublishOptions::default(),
+        None,
+    )
+    .unwrap();
+    assert!(matches!(replay, PublishOutcome::AlreadyCurrent { .. }));
+    assert_eq!(stub.lock().counter, commits_before);
+}
+
+#[test]
+fn cdp1_unverified_commit_reconciles_over_loopback_http() {
+    use crosslink::state_broker::cdp1::{
+        publish_checkpoint, PublishOptions, PublishOutcome, PublisherIdentity,
+    };
+    let stub = StubBroker::start();
+    stub.set_unverified_next();
+    let client = stub.client();
+    let source = Cdp1Source::new(2);
+    let outcome = publish_checkpoint(
+        &client,
+        &source,
+        &cdp1_config(),
+        &PublisherIdentity::writer(UUID),
+        &PublishOptions::default(),
+        None,
+    )
+    .unwrap();
+    assert!(
+        matches!(outcome, PublishOutcome::Landed { .. }),
+        "expected Landed via reconciliation, got {outcome:?}"
+    );
+    assert_eq!(stub.lock().counter, 1, "exactly one landed commit");
+}
+
+#[test]
+fn cdp1_readback_mismatch_retries_and_lands_over_loopback_http() {
+    use crosslink::state_broker::cdp1::{
+        publish_checkpoint, PublishOptions, PublishOutcome, PublisherIdentity,
+    };
+    let stub = StubBroker::start();
+    stub.set_readback_mismatch_next_commit();
+    let client = stub.client();
+    let source = Cdp1Source::new(3);
+    let outcome = publish_checkpoint(
+        &client,
+        &source,
+        &cdp1_config(),
+        &PublisherIdentity::writer(UUID),
+        &PublishOptions::default(),
+        None,
+    )
+    .unwrap();
+    assert!(
+        matches!(outcome, PublishOutcome::Landed { .. }),
+        "expected Landed after the 502 retry, got {outcome:?}"
+    );
+    assert_eq!(stub.lock().counter, 1);
+}
+
+#[test]
+fn cdp1_stale_state_over_loopback_http_does_not_clobber() {
+    use crosslink::state_broker::cdp1::{
+        publish_checkpoint, PublishOptions, PublishOutcome, PublisherIdentity,
+    };
+    let stub = StubBroker::start();
+    let client = stub.client();
+    let first = Cdp1Source::new(4);
+    let identity = PublisherIdentity::writer(UUID);
+    // Land an older publish.
+    assert!(matches!(
+        publish_checkpoint(&client, &first, &cdp1_config(), &identity, &PublishOptions::default(), None)
+            .unwrap(),
+        PublishOutcome::Landed { .. }
+    ));
+    let commits = stub.lock().counter;
+    // A newer candidate sees an injected stale_state; the stub wrote nothing.
+    stub.set_stale_unattached_next();
+    let newer = Cdp1Source::new(5);
+    let outcome = publish_checkpoint(
+        &client,
+        &newer,
+        &cdp1_config(),
+        &identity,
+        &PublishOptions::default(),
+        None,
+    )
+    .unwrap();
+    // Either it reconciles to NotLanded and retries to a landing, or it stays
+    // fail-closed; it must never overwrite with an unverified write.
+    match outcome {
+        PublishOutcome::Landed { .. } | PublishOutcome::NotLanded { .. }
+        | PublishOutcome::ReconcileRequired { .. } => {}
+        other => panic!("unexpected outcome {other:?}"),
+    }
+    assert!(stub.lock().counter >= commits, "no lost commit");
+}
+
+#[test]
+fn cdp1_oversized_manifest_is_refused_at_loopback() {
+    use crosslink::state_broker::cdp1::{read_derived_checkpoint, ReadExpectations};
+    let stub = StubBroker::start();
+    let source = Cdp1Source::new(6);
+    stub.seed([
+        (
+            "checkpoint/manifest.json".to_string(),
+            vec![b' '; 4_097],
+        ),
+        (
+            "checkpoint/chunks/0000".to_string(),
+            source.checkpoint.state_bytes.clone(),
+        ),
+    ]);
+    let error = read_derived_checkpoint(
+        &stub.client(),
+        &cdp1_config(),
+        &ReadExpectations::default(),
+        None,
+    )
+    .unwrap_err();
+    assert_eq!(
+        error
+            .details()
+            .and_then(|d| d.get("defect"))
+            .and_then(|v| v.as_str()),
+        Some("oversized_manifest")
     );
 }

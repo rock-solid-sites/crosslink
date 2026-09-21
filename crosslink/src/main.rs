@@ -1642,6 +1642,18 @@ enum KnowledgeCommands {
 enum StateBrokerCommands {
     /// Show the selected backend and the durable project-state head (read-only)
     Status,
+    /// Publish the pushed v3 checkpoint as a CDP-1 derived publish (ADR-802)
+    PublishCheckpoint {
+        /// Plan and check capacity only; performs zero broker calls
+        #[arg(long)]
+        dry_run: bool,
+        /// Reconstruct and digest the full state after landing
+        #[arg(long)]
+        verify_full: bool,
+        /// Publisher identity recorded in the manifest (default: agent id or token id)
+        #[arg(long)]
+        publisher_id: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]

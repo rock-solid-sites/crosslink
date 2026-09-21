@@ -41,23 +41,31 @@ pub mod source;
 #[cfg(test)]
 mod tests;
 
-pub use attempt::{AttemptPhase, AttemptRecord, AttemptStore, AttemptResolution};
+#[allow(unused_imports)]
+pub use attempt::{AttemptPhase, AttemptRecord, AttemptResolution, AttemptStore};
+#[allow(unused_imports)]
 pub use capacity::{check_capacity, CapacityError, CapacityPlan};
+#[allow(unused_imports)]
 pub use manifest::{
     CheckpointManifestV1, ChunkEntry, Encoding, ManifestContext, ManifestDefect, ManifestError,
     SourceCheckpoint,
 };
+#[allow(unused_imports)]
 pub use payload::{gzip_decode_bounded, gzip_encode, join_payload, split_payload};
+#[allow(unused_imports)]
 pub use projection::{
     verify_derived_projection, write_derived_projection, DerivedProjectionMarker,
     ProjectionFileV2,
 };
+#[allow(unused_imports)]
 pub use publisher::{
     classify_head, plan_publish, publish_checkpoint, Cdp1Config, DivergenceReason, HeadVerdict,
     PublishOptions, PublishOutcome, PublishPlan, PublisherIdentity, RefusalReason,
     ReconcileFailure,
 };
+#[allow(unused_imports)]
 pub use reader::{read_derived_checkpoint, Provenance, ReadExpectations, VerifiedCheckpoint};
+#[allow(unused_imports)]
 pub use source::{
     CheckpointSource, GitCheckpointSource, JournalAnchor, PushedCheckpoint, RepositoryBinding,
 };

@@ -1124,3 +1124,224 @@ fn manifest_context_round_trip_for_mock_state() {
         })
         .unwrap();
 }
+
+// ── Projection (T24/T26/T37/T44) ─────────────────────────────────────
+
+#[test]
+fn t37_projection_write_verify_and_staleness() {
+    use super::projection::{
+        read_marker, verify_derived_projection, write_derived_projection, PROJECTED_STATE_PATH,
+    };
+    let transport = seeded_transport();
+    let source = MockCheckpointSource::new(1);
+    publish_landed(&transport, &source);
+    let dir = tempfile::tempdir().unwrap();
+
+    let marker = write_derived_projection(
+        &transport,
+        &cfg(),
+        dir.path(),
+        &ReadExpectations::default(),
+        Some(&source),
+    )
+    .unwrap();
+    assert!(marker.complete);
+    assert_eq!(marker.provenance, "journal_anchored");
+    assert_eq!(marker.state_sha256, source.checkpoint.state_sha256);
+    assert_eq!(marker.files.len(), 1);
+    assert_eq!(marker.files[0].path, PROJECTED_STATE_PATH);
+    let projected = std::fs::read(dir.path().join(PROJECTED_STATE_PATH)).unwrap();
+    assert_eq!(projected, source.checkpoint.state_bytes);
+
+    // Verify at the same head with the anchor: passes.
+    let verified = verify_derived_projection(
+        &transport,
+        &cfg(),
+        dir.path(),
+        &ReadExpectations::default(),
+        Some(&source),
+    )
+    .unwrap();
+    assert_eq!(verified.head_commit, marker.head_commit);
+
+    // A new publish makes the projection stale.
+    let newer = MockCheckpointSource::new(2);
+    publish_landed(&transport, &newer);
+    let error = verify_derived_projection(
+        &transport,
+        &cfg(),
+        dir.path(),
+        &ReadExpectations::default(),
+        Some(&source),
+    )
+    .unwrap_err();
+    assert!(error.message().contains("stale"), "{}", error.message());
+
+    // A tampered projected file is refused.
+    let head_after = transport.head().unwrap();
+    assert_eq!(read_marker(dir.path()).unwrap().head_commit, marker.head_commit);
+    assert_ne!(head_after, marker.head_commit);
+    std::fs::write(dir.path().join(PROJECTED_STATE_PATH), b"tampered").unwrap();
+    // Re-write the marker to point at the new head, then verify the digest.
+    let mut forged = read_marker(dir.path()).unwrap();
+    forged.head_commit = head_after;
+    forged.complete = true;
+    std::fs::write(
+        dir.path().join(super::PROJECTION_MARKER_FILE),
+        serde_json::to_vec_pretty(&forged).unwrap(),
+    )
+    .unwrap();
+    let error = verify_derived_projection(
+        &transport,
+        &cfg(),
+        dir.path(),
+        &ReadExpectations::default(),
+        Some(&source),
+    )
+    .unwrap_err();
+    assert!(
+        error.message().contains("manifest") || error.message().contains("digest"),
+        "{}",
+        error.message()
+    );
+}
+
+#[test]
+fn t26_incomplete_projection_marker_is_refused() {
+    use super::projection::{read_marker, verify_derived_projection, write_derived_projection};
+    let transport = seeded_transport();
+    let source = MockCheckpointSource::new(1);
+    publish_landed(&transport, &source);
+    let dir = tempfile::tempdir().unwrap();
+    write_derived_projection(
+        &transport,
+        &cfg(),
+        dir.path(),
+        &ReadExpectations::default(),
+        Some(&source),
+    )
+    .unwrap();
+    let mut marker = read_marker(dir.path()).unwrap();
+    marker.complete = false;
+    std::fs::write(
+        dir.path().join(super::PROJECTION_MARKER_FILE),
+        serde_json::to_vec_pretty(&marker).unwrap(),
+    )
+    .unwrap();
+    let error = verify_derived_projection(
+        &transport,
+        &cfg(),
+        dir.path(),
+        &ReadExpectations::default(),
+        Some(&source),
+    )
+    .unwrap_err();
+    assert!(error.message().contains("incomplete"), "{}", error.message());
+}
+
+#[test]
+fn t44_advisory_projection_cannot_hydrate() {
+    use super::projection::{read_marker, verify_derived_projection, write_derived_projection};
+    let transport = seeded_transport();
+    let source = MockCheckpointSource::new(1);
+    publish_landed(&transport, &source);
+    let dir = tempfile::tempdir().unwrap();
+    write_derived_projection(
+        &transport,
+        &cfg(),
+        dir.path(),
+        &ReadExpectations::default(),
+        Some(&source),
+    )
+    .unwrap();
+    // Forge the marker's provenance to advisory (as a broker-only writer would).
+    let mut marker = read_marker(dir.path()).unwrap();
+    marker.provenance = "advisory".to_string();
+    std::fs::write(
+        dir.path().join(super::PROJECTION_MARKER_FILE),
+        serde_json::to_vec_pretty(&marker).unwrap(),
+    )
+    .unwrap();
+    // Authoritative hydration refuses it.
+    let error = verify_derived_projection(
+        &transport,
+        &cfg(),
+        dir.path(),
+        &ReadExpectations {
+            journal_anchored: true,
+            ..Default::default()
+        },
+        Some(&source),
+    )
+    .unwrap_err();
+    assert!(
+        error.message().contains("journal_anchored") || error.message().contains("advisory"),
+        "{}",
+        error.message()
+    );
+    // An explicit advisory consumer may still read it.
+    verify_derived_projection(
+        &transport,
+        &cfg(),
+        dir.path(),
+        &ReadExpectations::default(),
+        None,
+    )
+    .unwrap();
+}
+
+#[test]
+fn t24_projection_min_watermark_is_enforced() {
+    use super::projection::{verify_derived_projection, write_derived_projection};
+    let transport = seeded_transport();
+    let source = MockCheckpointSource::new(1);
+    publish_landed(&transport, &source);
+    let dir = tempfile::tempdir().unwrap();
+    write_derived_projection(
+        &transport,
+        &cfg(),
+        dir.path(),
+        &ReadExpectations::default(),
+        Some(&source),
+    )
+    .unwrap();
+    let error = verify_derived_projection(
+        &transport,
+        &cfg(),
+        dir.path(),
+        &ReadExpectations {
+            min_watermark: Some(OrderingKey {
+                timestamp: Utc::now() + chrono::Duration::days(1),
+                agent_id: "driver".to_string(),
+                agent_seq: 99,
+            }),
+            ..Default::default()
+        },
+        Some(&source),
+    )
+    .unwrap_err();
+    assert!(
+        error.message().contains("older than the required minimum"),
+        "{}",
+        error.message()
+    );
+}
+
+#[test]
+fn t39_inventory_blob_mismatch_is_refused() {
+    // The live map disagrees with the head commit snapshot: the inventory
+    // cross-check must catch it before any parse.
+    let transport = seeded_transport();
+    let source = MockCheckpointSource::new(1);
+    publish_landed(&transport, &source);
+    // Mutate only the live map (the head snapshot keeps the committed bytes).
+    transport.upsert_file(MANIFEST_PATH, b"{\"schema\":\"forged\"}");
+    let error = read_derived_checkpoint(
+        &transport,
+        &cfg(),
+        &ReadExpectations::default(),
+        Some(&source),
+    )
+    .unwrap_err();
+    assert_eq!(defect_of(&error), ReaderDefect::InventoryMismatch.label());
+}

@@ -268,6 +268,18 @@ fn append_inner_impl<A: IntoAbortPoint>(
         .with_context(|| format!("corrupt events.log on ref '{ref_name}'; refusing to extend"))?;
     let events_in_log = existing_events.len() + 1;
 
+    // ADR-802 §17 item 9: enforce the journal high-water mark at append. A
+    // duplicate or out-of-order `(agent_id, agent_seq)` must fail hard;
+    // reducer idempotency is a safety net, not the contract.
+    if let Some(high) = existing_events.iter().map(|event| event.agent_seq).max() {
+        anyhow::ensure!(
+            envelope.agent_seq > high,
+            "journal high-water mark violation on '{ref_name}': agent_seq {high} is already \
+             recorded; refusing to append agent_seq {} (duplicate or out-of-order)",
+            envelope.agent_seq
+        );
+    }
+
     // ── Step c: serialise the new line ───────────────────────────────
     let new_line = serde_json::to_string(envelope).context("failed to serialise event envelope")?;
     let mut new_bytes = existing_bytes;
@@ -3095,6 +3107,28 @@ mod tests {
     }
 
     // ── Test 2: sequential appends ───────────────────────────────────
+
+    #[test]
+    fn append_rejects_duplicate_and_out_of_order_agent_seq() {
+        let dir = tempfile::tempdir().unwrap();
+        git_init(dir.path());
+        let agent_id = "hwm-agent";
+        append_event_to_ref(dir.path(), agent_id, &make_envelope(agent_id, 1)).unwrap();
+        // Duplicate seq.
+        let duplicate = append_event_to_ref(dir.path(), agent_id, &make_envelope(agent_id, 1));
+        assert!(duplicate.is_err(), "duplicate agent_seq must be refused");
+        // Out-of-order (older) seq.
+        let older = append_event_to_ref(dir.path(), agent_id, &make_envelope(agent_id, 0));
+        assert!(older.is_err(), "out-of-order agent_seq must be refused");
+        // The ref is untouched by the refused appends.
+        let tip = git_rev_parse_optional(dir.path(), "refs/heads/crosslink/agents/hwm-agent")
+            .unwrap()
+            .unwrap();
+        let log = run_git_output(dir.path(), &["cat-file", "blob", &format!("{tip}:events.log")]);
+        assert_eq!(log.lines().count(), 1);
+        // The next monotonic seq still appends.
+        append_event_to_ref(dir.path(), agent_id, &make_envelope(agent_id, 2)).unwrap();
+    }
 
     #[test]
     fn sequential_appends_chain_commits_and_preserve_order() {

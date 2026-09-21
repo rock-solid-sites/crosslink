@@ -1,5 +1,5 @@
 {
-  "next_display_id": 802,
+  "next_display_id": 803,
   "next_comment_id": 1178,
   "display_id_map": {
     "00a365a3-7b31-465a-aced-4f1e39c68f8b": 118,
@@ -568,6 +568,7 @@
     "b0624b76-7774-4c71-92d3-221374358b11": 274,
     "b1144b4e-d5d7-4aa3-a127-531387a50783": 57,
     "b1c329f6-be68-452a-8940-a2d10b05544a": 733,
+    "b204e835-0918-4acb-b476-ee3c3c0dcd04": 802,
     "b2ddf508-8be6-454f-b6b9-8de110eb497e": 7,
     "b3104de6-9eca-489a-ad7f-bc59e6311789": 200,
     "b355793d-0dc2-464c-8794-e2cc6ccb5022": 532,
@@ -18258,6 +18259,17 @@
         }
       }
     },
+    "b204e835-0918-4acb-b476-ee3c3c0dcd04": {
+      "uuid": "b204e835-0918-4acb-b476-ee3c3c0dcd04",
+      "display_id": 802,
+      "title": "State broker transport adapter: Crosslink-side consumption of crosslink-state-broker",
+      "description": "Goal: \n\nAcceptance criteria:\n- \n\nGoal:\nAdd the smallest clean Crosslink-side adapter for the deployed crosslink-state-broker (rock-solid-sites/crosslink-state-broker), so Crosslink can read durable project state, hydrate state blobs into disposable local projections, and submit expected-head/CAS mutations with typed stale_state handling - while existing local git/SQLite behavior stays the default and is not replaced.\n\nAcceptance criteria:\n- Broker transport behind one narrow persistence seam; existing git paths untouched by default.\n- read state/head, read blob, CAS commit, verify/read-back all supported.\n- Typed broker failure handling incl. stale_state, never blind-retried.\n- Broker URL/UUID from config or env; bearer token from env/secret file only, never printed or persisted.\n- Deterministic unit/integration tests with mock/local broker; no live broker dependency.\n- Integration point, assumptions, and live-test next step documented.\n- No GitHub credentials introduced into Crosslink; no production broker mutations during development.\n\nParent context: ASES Crosslink #564 (Codex Build v0.1 reusable Codex Cloud plugin and ASES testbed). Repo: /home/claude-code/projects/crosslink at preserved baseline d323f020dd1a592113d71ebdb1facefb4b426a18 (feature/pp3g-Zbk6-cleanup-rescope-349). Work happens on a new branch/worktree; preserved branch must not be modified.",
+      "status": "open",
+      "priority": "high",
+      "created_by": "driver",
+      "created_at": "2026-09-21T02:53:54.596931558Z",
+      "updated_at": "2026-09-21T02:53:54.596931558Z"
+    },
     "b2ddf508-8be6-454f-b6b9-8de110eb497e": {
       "uuid": "b2ddf508-8be6-454f-b6b9-8de110eb497e",
       "display_id": 7,
@@ -25828,11 +25840,16 @@
       "agent_id": "dY7W-acPg-implement-issue-801-using-the-completed-audit-in-17b3",
       "agent_seq": 6,
       "timestamp": "2026-09-05T11:44:06.820177649Z"
+    },
+    {
+      "agent_id": "driver",
+      "agent_seq": 66,
+      "timestamp": "2026-09-21T02:53:54.596931558Z"
     }
   ],
   "watermark": {
-    "timestamp": "2026-09-05T11:44:06.820177649Z",
-    "agent_id": "dY7W-acPg-implement-issue-801-using-the-completed-audit-in-17b3",
-    "agent_seq": 6
+    "timestamp": "2026-09-21T02:53:54.596931558Z",
+    "agent_id": "driver",
+    "agent_seq": 66
   }
 }

@@ -1,0 +1,18 @@
+{
+  "expected_model": "opencode-go/glm-5.3-flash",
+  "session_id": "ses_f3dc9d32cffe4iIIXE9vnYwafV",
+  "resolved_model": null,
+  "provider": null,
+  "assistant_messages": 0,
+  "tokens": {
+    "input": 0,
+    "output": 0,
+    "reasoning": 0,
+    "cache_read": 0,
+    "cache_write": 0,
+    "total": 0
+  },
+  "cost_usd": 0.0,
+  "finish_reasons": [],
+  "extraction": "raw events fallback"
+}

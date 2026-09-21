@@ -145,9 +145,30 @@ End-to-end tests added: `hydrate_into` rejects an inventory/blob mismatch on the
 real call path (tampering transport), and `verify_projection` rejects a tampered
 projected file (digest check wired into the gate).
 
-Updated counts after the correction pass: `state_broker` lib 80, bin 81,
-contract 16. Full-suite results for the corrected tree are recorded in the
-correction-pass commit message / final report.
+### 6.3 Correction-pass verification run (commit `d4105831e`)
+
+| Command | Result |
+|---|---|
+| `cargo test --lib state_broker` | 80 passed, 0 failed |
+| `cargo test --bin crosslink state_broker` | 81 passed, 0 failed |
+| `cargo test --test state_broker_contract` | 16 passed, 0 failed (real HTTP over 127.0.0.1) |
+| `cargo test --test state_broker_live` | 0 run, 1 ignored (live probe; requires operator env) |
+| `cargo test --lib` (full library) | 1893 passed, 0 failed |
+| `cargo test --bin crosslink -- --skip proptest --skip agents_hygiene` (full bin suite) | 2948 passed, 0 failed, 58 filtered |
+| `cargo test --test cli_integration` (full CLI suite) | 199 passed, 0 failed |
+| `cargo clippy --lib --bins --tests` | no `state_broker` warnings except the pre-existing command-dispatcher `needless_pass_by_value` |
+| `rustfmt --edition 2021 --check` on touched files | clean |
+
+The full bin suite in this sandbox additionally skipped five pre-existing
+network-dependent dashboard tests
+(`test_track_inserts_row_with_derived_slug`,
+`test_track_with_slug_override_wins_over_origin`,
+`test_track_rejects_duplicate_slug`,
+`test_track_repo_without_hub_branch_still_succeeds`,
+`test_untrack_removes_row_and_leaves_working_copy`): their setup runs
+`git remote show origin` against a real GitHub URL, which hangs in this
+environment. They are unrelated to this delta (`dashboard/projects.rs` is
+untouched); earlier runs of the same suite passed with them included.
 
 The full bin suite was run with `--skip proptest --skip agents_hygiene`,
 matching the branch's documented practice (proptest runs in a dedicated job;
@@ -167,12 +188,15 @@ Relative to the base branch tip (`feature/pp3g-state-broker-adapter` @
 `48b503ec6`):
 
 ```
-13 files changed, 3199 insertions(+), 436 deletions(-)   (net +2763)
+13 files changed, 3882 insertions(+), 438 deletions(-)   (net +3444)
 ```
 
-Breakdown by area: production logic/API ≈ +1,000; new `projection.rs` ≈ +545
-(including its unit tests); test suites ≈ +1,100; design doc/handoff/CHANGELOG
-≈ +200; the rest is moved/rewritten documentation inside the touched modules.
+The focused-review correction pass alone is `9 files changed, 743
+insertions(+), 62 deletions(-)` (`git diff --shortstat 955f6a11f...HEAD`).
+
+Breakdown by area: production logic/API ≈ +1,100; new `projection.rs` ≈ +545
+(including its unit tests); test suites ≈ +1,700; design doc/handoff/CHANGELOG
+≈ +300; the rest is moved/rewritten documentation inside the touched modules.
 The base adapter branch itself remains +5515/−1 against `main`.
 
 ## 8. Remaining architectural blockers before `SyncManager` wiring

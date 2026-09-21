@@ -232,7 +232,7 @@ cache; no source changes to the preserved branch):
 |---|---|
 | `cargo test --lib state_broker` | 41 passed, 0 failed |
 | `cargo test --bin crosslink state_broker` | 42 passed, 0 failed |
-| `cargo test --bin crosslink -- --skip proptest --skip agents_hygiene` (full bin suite) | pending final run (see handoff); the previous complete run was 2928 passed / 1 failed — the failure was the `hydrate_to_sqlite_exempt` call-site inventory guard, tripped by the adapter test calling that audit-guarded destructive path. The test was rewritten to use the v3 checkpoint path (`hydrate_from_state`), the guard test re-verified individually (1 passed) |
+| `cargo test --bin crosslink -- --skip proptest --skip agents_hygiene` (full bin suite) | 2914 passed, 0 failed, 53 filtered (37 proptest + 16 `agents_hygiene`) |
 | `cargo test --test cli_integration` (full CLI suite) | 199 passed, 0 failed |
 | `cargo test --test state_broker_contract` | 8 passed, 0 failed (real HTTP over 127.0.0.1) |
 | `cargo test --test state_broker_live` | 0 run, 1 ignored (live probe; requires operator env) |
@@ -265,6 +265,15 @@ dispositions are recorded in full in `handoffs/802-review-hy3.md`. Summary:
 The reviewer's contract-conformance, secret-safety, projection-safety, and
 integration-point verdicts were clean. It ran no tests and made no live broker
 call (disclosed).
+
+## 7.2 Known pre-existing flake (not from this change)
+
+`commands::agents_hygiene::tests` is parallelism-flaky because `run_sync`
+installs the policy at `crosslink_dir.parent()/AGENTS.md` and the tests pass a
+bare tempdir (so the target is the shared `/tmp/AGENTS.md`). Reproduction: 2
+failures in 15 consecutive module runs; the module passes in isolation, and its
+source is untouched here. Filed as Crosslink issue #803; the adapter's own
+tests use per-test tempdirs only.
 
 ## 8. Next step: live verification (after the Codex Cloud durability experiment passes)
 

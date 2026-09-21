@@ -1,6 +1,6 @@
 {
   "next_display_id": 803,
-  "next_comment_id": 1178,
+  "next_comment_id": 1179,
   "display_id_map": {
     "00a365a3-7b31-465a-aced-4f1e39c68f8b": 118,
     "01b74b94-82e0-4bda-9bed-7eace0292544": 70,
@@ -18272,11 +18272,22 @@
       "priority": "high",
       "created_by": "driver",
       "created_at": "2026-09-21T02:53:54.596931558Z",
-      "updated_at": "2026-09-21T02:54:06.938247291Z",
+      "updated_at": "2026-09-21T03:19:05.500022695Z",
       "labels": [
         "feature",
         "state-broker"
-      ]
+      ],
+      "comments": {
+        "ce3f375d-ef01-466c-b58d-a34e501200a0": {
+          "display_id": 1178,
+          "author": "driver",
+          "content": "[PROGRESS] checkpoint — implementation + tests complete on feature/pp3g-state-broker-adapter\n\nScope: smallest clean Crosslink-side adapter for the deployed crosslink-state-broker (no redesign, no migration, no GitHub credentials, no live broker mutations).\n\nDone:\n- Recon confirmed no existing read+mutation StateStore abstraction; closest boundaries are HubSource (read-only), hub_v3 CAS plumbing, SyncManager (git transport), hydration (projection consumer).\n- New module crosslink/src/state_broker/ behind a narrow ProjectStateTransport trait: read state/head, read blob, verify, expected-head CAS commit, disposable hydrate_into; typed stale_state + all contract error codes; commit_cas reconciliation via Broker-Op trailer.\n- Config/env selection (default stays local git; broker opt-in); bearer token from env or token file, redacted everywhere, never persisted.\n- Local projections explicitly disposable; proven by feeding a broker projection to the existing hydration path in a unit test.\n- Tests: 40 lib unit + 41 bin unit + 6 loopback-stub HTTP contract tests green; 1 ignored read-only live probe; clippy clean for the new module (1 pedantic warning consistent with existing command modules). Repo-wide fmt not applied (baseline not fmt-clean); new files formatted.\n- Docs: .design/state-broker-transport.md (integration point + assumptions + live-test steps), CHANGELOG, CLI reference section.\n\nBranch: feature/pp3g-state-broker-adapter (worktree .worktrees/pp3g-state-broker-adapter), baseline d323f020 untouched.\nNext: full bin + cli_integration suites; final handoff; then live read-only verification by operator after the Codex Cloud durability experiment passes.",
+          "created_at": "2026-09-21T03:19:05.484438037Z",
+          "kind": "note",
+          "signed_by": "SHA256:cx5PuRP0j7pktPKktl0WwbMp5uEwfFy9WoiBcgyhe18",
+          "signature": "U1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAguEQKo5PmNONBqYSfFi6Ry6tvLy9D5GLM9YcPkF7QNdoAAAARY3Jvc3NsaW5rLWNvbW1lbnQAAAAAAAAABnNoYTUxMgAAAFMAAAALc3NoLWVkMjU1MTkAAABA5TDwGDtIimN7frmM8lfkpXlPC0kJzzirjw0kBzTi1FT4GbMqhAhMVKUN1fDwOX3AW5WRwNZ+KaTpVYpbY9LRBQ=="
+        }
+      }
     },
     "b2ddf508-8be6-454f-b6b9-8de110eb497e": {
       "uuid": "b2ddf508-8be6-454f-b6b9-8de110eb497e",
@@ -25868,11 +25879,16 @@
       "agent_id": "driver",
       "agent_seq": 69,
       "timestamp": "2026-09-21T02:54:17.931872435Z"
+    },
+    {
+      "agent_id": "driver",
+      "agent_seq": 70,
+      "timestamp": "2026-09-21T03:19:05.500022695Z"
     }
   ],
   "watermark": {
-    "timestamp": "2026-09-21T02:54:17.931872435Z",
+    "timestamp": "2026-09-21T03:19:05.500022695Z",
     "agent_id": "driver",
-    "agent_seq": 69
+    "agent_seq": 70
   }
 }

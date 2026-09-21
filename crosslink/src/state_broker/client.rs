@@ -433,8 +433,10 @@ struct Envelope<T> {
 struct ErrorEnvelope {
     code: String,
     message: String,
+    /// Broker-supplied retryability. `None` falls back to the code default;
+    /// an explicit `false` (e.g. a read-back mismatch) is never overridden.
     #[serde(default)]
-    retryable: bool,
+    retryable: Option<bool>,
     #[serde(default)]
     details: Option<Value>,
 }
@@ -720,7 +722,7 @@ impl StateBrokerClient {
         Err(StateBrokerError::from_envelope(
             code,
             self.config.redact(&error.message),
-            error.retryable || code.default_retryable(),
+            error.retryable.unwrap_or_else(|| code.default_retryable()),
             error
                 .details
                 .as_ref()

@@ -41,6 +41,8 @@ struct StubState {
     unknown_error_code: bool,
     /// Echo the bearer token in the next error envelope (redaction test).
     echo_token_next: bool,
+    /// Return a non-retryable read-back mismatch for the next request.
+    readback_mismatch_next: bool,
 }
 
 struct StubBroker {
@@ -65,6 +67,7 @@ impl StubBroker {
             broken_next_response: false,
             unknown_error_code: false,
             echo_token_next: false,
+            readback_mismatch_next: false,
         }));
         let stop = Arc::new(AtomicBool::new(false));
         let thread_state = Arc::clone(&state);
@@ -133,6 +136,11 @@ impl StubBroker {
     /// message and details (a misbehaving broker; the client must redact).
     fn set_echo_token_next(&self) {
         self.lock().echo_token_next = true;
+    }
+
+    /// Make the next response a non-retryable read-back mismatch (502).
+    fn set_readback_mismatch_next(&self) {
+        self.lock().readback_mismatch_next = true;
     }
 
     fn head(&self) -> Option<String> {
@@ -294,6 +302,27 @@ fn route(request: &StubRequest, state: &Arc<Mutex<StubState>>) -> (u16, serde_js
                 "missing or invalid broker credential",
                 false,
             ),
+        );
+    }
+
+    if guard.readback_mismatch_next {
+        guard.readback_mismatch_next = false;
+        return (
+            502,
+            serde_json::json!({
+                "ok": false,
+                "operation": "state.commit",
+                "request_id": "stub",
+                "error": {
+                    "code": "upstream_error",
+                    "message": "state commit landed but read-back verification failed; reconcile before retrying the write",
+                    "retryable": false,
+                    "details": {
+                        "commit": "a".repeat(40),
+                        "failed_paths": ["a.json"],
+                    },
+                },
+            }),
         );
     }
 
@@ -905,6 +934,38 @@ fn token_never_leaks_into_errors_logs_or_urls() {
         crosslink::state_broker::BrokerErrorCode::Unauthorized
     );
     assert_eq!(error.http_status(), Some(401));
+}
+
+#[test]
+fn readback_mismatch_is_non_retryable_through_the_client() {
+    let broker = StubBroker::start();
+    broker.seed(vec![("a.json", b"{}".to_vec())]);
+    let client = broker.client();
+
+    broker.set_readback_mismatch_next();
+    let error = client.read_state().unwrap_err();
+    assert_eq!(
+        error.code(),
+        crosslink::state_broker::BrokerErrorCode::UpstreamError
+    );
+    assert!(error.is_readback_mismatch());
+    assert!(
+        !error.retryable(),
+        "an explicit retryable=false (read-back mismatch) must not be overridden by the code default"
+    );
+
+    // Control: stale_state stays retryable.
+    let stale = client
+        .commit(&CommitRequest::single(
+            "a.json",
+            b"{}".to_vec(),
+            None,
+            "control commit",
+            None,
+        ))
+        .unwrap_err();
+    assert!(stale.is_stale_state());
+    assert!(stale.retryable());
 }
 
 #[test]

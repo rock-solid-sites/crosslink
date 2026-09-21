@@ -71,6 +71,11 @@ mod seam;
 mod server;
 mod shared_writer;
 mod signing;
+// The bin only needs `StateBackend`/`StateBrokerClient` for `state-broker
+// status`; the rest of the broker transport surface is for the lib, tests, and
+// future call sites (same pattern as other lib-first modules in this tree).
+#[allow(dead_code)]
+mod state_broker;
 mod sync;
 mod trust_model;
 mod tui;
@@ -294,6 +299,12 @@ enum Commands {
     Integrity {
         #[command(subcommand)]
         action: Option<IntegrityCommands>,
+    },
+
+    /// Inspect the configured durable-state backend (read-only; never mutates the broker)
+    StateBroker {
+        #[command(subcommand)]
+        action: StateBrokerCommands,
     },
 
     /// Run event compaction manually
@@ -1625,6 +1636,12 @@ enum KnowledgeCommands {
         #[arg(long)]
         refresh: bool,
     },
+}
+
+#[derive(Subcommand)]
+enum StateBrokerCommands {
+    /// Show the selected backend and the durable project-state head (read-only)
+    Status,
 }
 
 #[derive(Subcommand)]
@@ -3230,6 +3247,11 @@ fn main() -> Result<()> {
             let crosslink_dir = find_crosslink_dir()?;
             let db = get_db()?;
             commands::integrity_cmd::run(action.as_ref(), &crosslink_dir, &db)
+        }
+
+        Commands::StateBroker { action } => {
+            let crosslink_dir = find_crosslink_dir()?;
+            commands::state_broker::run(action, &crosslink_dir, cli.json)
         }
 
         Commands::Prune {

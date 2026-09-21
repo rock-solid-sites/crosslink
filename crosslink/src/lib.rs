@@ -31,6 +31,7 @@ pub mod seam;
 pub mod server;
 pub mod shared_writer;
 pub mod signing;
+pub mod state_broker;
 pub mod sync;
 pub mod token_usage;
 pub mod trust_model;

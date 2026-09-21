@@ -42,6 +42,7 @@ pub mod search;
 pub mod sentinel;
 pub mod session;
 pub mod show;
+pub mod state_broker;
 pub mod style;
 pub mod swarm;
 pub mod tested;

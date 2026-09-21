@@ -1,0 +1,29 @@
+{
+  "expected_model": "opencode-go/muse-spark-1.3-contributor",
+  "session_id": "ses_f3dc9d00affeacc0ABhe49Q6Up",
+  "resolved_model": "muse-spark-1.3-contributor",
+  "provider": "opencode-go",
+  "assistant_messages": 10,
+  "tokens": {
+    "input": 147517,
+    "output": 7691,
+    "reasoning": 2836,
+    "cache_read": 573546,
+    "cache_write": 0,
+    "total": 731590
+  },
+  "cost_usd": 0.018004192000000002,
+  "finish_reasons": [
+    "tool-calls",
+    "tool-calls",
+    "tool-calls",
+    "tool-calls",
+    "tool-calls",
+    "tool-calls",
+    "tool-calls",
+    "tool-calls",
+    "tool-calls",
+    "stop"
+  ],
+  "extraction": "opencode export"
+}

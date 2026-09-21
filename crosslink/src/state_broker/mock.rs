@@ -1,11 +1,13 @@
-//! Deterministic in-memory broker with the same semantics as the deployed
-//! service, for tests and dry runs.
+//! Deterministic in-memory broker with the same observable semantics as the
+//! deployed service, for tests and dry runs.
 //!
 //! The mock enforces the broker contract's observable rules: input validation
 //! (shared with the real client), expected-head compare-and-swap with
 //! [`BrokerErrorCode::StaleState`] and nothing written on conflict, broker-owned
-//! trailers (`Project-UUID:`, `Broker:`, `Broker-Op:`) in commit messages, and
-//! per-file SHA-256 read-back.
+//! trailers (`Project-UUID:`, `Broker:`, `Broker-Op:`) in commit messages,
+//! per-file SHA-256 read-back, and **commit history** — `verify` and `read_blob`
+//! serve any known commit, exactly as the real broker reads any historical tree
+//! (`state.ts::verify`, `state.ts::readFile`).
 //!
 //! It intentionally does not model multi-process concurrency; tests use
 //! [`MockStateTransport::inject_competing_commit`] to simulate a competing
@@ -25,7 +27,13 @@ use super::client::{
 use super::digest::{pseudo_git_sha, sha256_hex};
 use super::error::{BrokerErrorCode, StateBrokerError};
 use super::transport::ProjectStateTransport;
-use super::validate::{validate_commit_sha, validate_logical_path};
+use super::validate::{validate_commit_sha, validate_logical_path, MAX_VERIFY_PATHS};
+
+/// One stored commit: its message and the full tree it snapshots.
+struct MockCommit {
+    message: String,
+    files: BTreeMap<String, Vec<u8>>,
+}
 
 /// In-memory broker transport.
 #[derive(Clone)]
@@ -36,12 +44,17 @@ pub struct MockStateTransport {
 struct MockState {
     project_uuid: String,
     head: Option<String>,
-    message: Option<String>,
     files: BTreeMap<String, Vec<u8>>,
     counter: u64,
     commits: u64,
+    /// Commit sha -> snapshot, so historical reads behave like the broker.
+    history: BTreeMap<String, MockCommit>,
     /// Queue of injected commit failures, consumed one per commit call.
     fail_next: VecDeque<StateBrokerError>,
+    /// Queue of injected `read_state` failures, consumed one per read.
+    fail_next_read_state: VecDeque<StateBrokerError>,
+    /// Queue of injected `read_blob` failures, consumed one per call.
+    fail_next_read_blob: VecDeque<StateBrokerError>,
 }
 
 impl MockStateTransport {
@@ -52,11 +65,13 @@ impl MockStateTransport {
             inner: Arc::new(Mutex::new(MockState {
                 project_uuid: project_uuid.to_string(),
                 head: None,
-                message: None,
                 files: BTreeMap::new(),
                 counter: 0,
                 commits: 0,
+                history: BTreeMap::new(),
                 fail_next: VecDeque::new(),
+                fail_next_read_state: VecDeque::new(),
+                fail_next_read_blob: VecDeque::new(),
             })),
         }
     }
@@ -77,9 +92,17 @@ impl MockStateTransport {
             state.counter += 1;
             let paths: Vec<String> = state.files.keys().cloned().collect();
             let commit = next_commit_sha(&state, &paths);
-            state.head = Some(commit);
-            state.message =
-                Some("mock: bootstrap\n\nProject-UUID: mock\nBroker: mock\n".to_string());
+            let message =
+                "mock: bootstrap\n\nProject-UUID: mock\nBroker: mock\n".to_string();
+            state.head = Some(commit.clone());
+            let snapshot = state.files.clone();
+            state.history.insert(
+                commit,
+                MockCommit {
+                    message,
+                    files: snapshot,
+                },
+            );
         }
         mock
     }
@@ -99,7 +122,12 @@ impl MockStateTransport {
     /// Current head commit message, if any.
     #[must_use]
     pub fn head_message(&self) -> Option<String> {
-        self.lock().message.clone()
+        let state = self.lock();
+        state
+            .head
+            .as_ref()
+            .and_then(|head| state.history.get(head))
+            .map(|commit| commit.message.clone())
     }
 
     /// Number of successful commits applied through [`Self::commit`].
@@ -108,16 +136,34 @@ impl MockStateTransport {
         self.lock().commits
     }
 
-    /// Raw bytes of a stored file.
+    /// Raw bytes of a stored file at the head.
     #[must_use]
     pub fn file_bytes(&self, path: &str) -> Option<Vec<u8>> {
         self.lock().files.get(path).cloned()
     }
 
-    /// All stored logical paths, sorted.
+    /// Raw bytes of `path` at an exact commit.
+    #[must_use]
+    pub fn file_bytes_at(&self, path: &str, commit: &str) -> Option<Vec<u8>> {
+        self.lock()
+            .history
+            .get(commit)
+            .and_then(|snapshot| snapshot.files.get(path).cloned())
+    }
+
+    /// All stored logical paths at the head, sorted.
     #[must_use]
     pub fn file_paths(&self) -> Vec<String> {
         self.lock().files.keys().cloned().collect()
+    }
+
+    /// Message of a known commit.
+    #[must_use]
+    pub fn commit_message(&self, commit: &str) -> Option<String> {
+        self.lock()
+            .history
+            .get(commit)
+            .map(|snapshot| snapshot.message.clone())
     }
 
     /// Queue one injected failure for the next [`Self::commit`] call.
@@ -125,6 +171,17 @@ impl MockStateTransport {
     /// retry exhaustion).
     pub fn fail_next_commit(&self, error: StateBrokerError) {
         self.lock().fail_next.push_back(error);
+    }
+
+    /// Queue one injected failure for the next [`Self::read_state`] call.
+    pub fn fail_next_read_state(&self, error: StateBrokerError) {
+        self.lock().fail_next_read_state.push_back(error);
+    }
+
+    /// Queue one injected failure for the next [`Self::read_blob`] call (used
+    /// to exercise interrupted hydration).
+    pub fn fail_next_read_blob(&self, error: StateBrokerError) {
+        self.lock().fail_next_read_blob.push_back(error);
     }
 
     /// Simulate a competing writer landing a commit before our next CAS
@@ -148,9 +205,26 @@ impl MockStateTransport {
         state.counter += 1;
         let paths: Vec<String> = state.files.keys().cloned().collect();
         let commit = next_commit_sha(&state, &paths);
+        let message = build_message(&state.project_uuid, message, op_id);
         state.head = Some(commit.clone());
-        state.message = Some(build_message(&state.project_uuid, message, op_id));
+        let snapshot = state.files.clone();
+        state.history.insert(
+            commit.clone(),
+            MockCommit {
+                message,
+                files: snapshot,
+            },
+        );
         commit
+    }
+
+    /// Simulate administrative deletion of the state ref between a conflict
+    /// and the reconciliation re-read (history stays readable, the ref is
+    /// gone).
+    pub fn inject_ref_deletion(&self) {
+        let mut state = self.lock();
+        state.head = None;
+        state.files.clear();
     }
 
     fn lock(&self) -> MutexGuard<'_, MockState> {
@@ -163,7 +237,10 @@ impl MockStateTransport {
 
 impl ProjectStateTransport for MockStateTransport {
     fn read_state(&self) -> Result<ProjectState, StateBrokerError> {
-        let state = self.lock();
+        let mut state = self.lock();
+        if let Some(error) = state.fail_next_read_state.pop_front() {
+            return Err(error);
+        }
         let entries: Vec<StateEntry> = state
             .files
             .iter()
@@ -174,8 +251,12 @@ impl ProjectStateTransport for MockStateTransport {
             })
             .collect();
         let head = state.head.clone().map(|commit| StateHead {
+            message: state
+                .history
+                .get(&commit)
+                .map(|snapshot| snapshot.message.clone())
+                .unwrap_or_default(),
             commit,
-            message: state.message.clone().unwrap_or_default(),
             committed_at: None,
         });
         Ok(ProjectState {
@@ -213,20 +294,22 @@ impl ProjectStateTransport for MockStateTransport {
         if let Some(at) = at {
             validate_commit_sha(at)?;
         }
-        let state = self.lock();
+        let mut state = self.lock();
+        if let Some(error) = state.fail_next_read_blob.pop_front() {
+            return Err(error);
+        }
         let Some(head) = state.head.clone() else {
             return Err(StateBrokerError::not_found(
                 "project has no durable state yet",
             ));
         };
-        if let Some(at) = at {
-            if at != head {
-                return Err(StateBrokerError::not_found(
-                    "state file not found at the requested commit",
-                ));
-            }
-        }
-        let Some(bytes) = state.files.get(path) else {
+        let commit_at = at.unwrap_or(head.as_str()).to_string();
+        let Some(snapshot) = state.history.get(&commit_at) else {
+            return Err(StateBrokerError::not_found(
+                "state file not found at the requested commit",
+            ));
+        };
+        let Some(bytes) = snapshot.files.get(path) else {
             return Err(StateBrokerError::not_found(format!(
                 "state file not found: {path}"
             )));
@@ -234,7 +317,7 @@ impl ProjectStateTransport for MockStateTransport {
         Ok(StateBlob {
             path: path.to_string(),
             requested_ref: at.unwrap_or("state").to_string(),
-            commit: head,
+            commit: commit_at,
             blob_sha: pseudo_git_sha(bytes),
             sha256: sha256_hex(bytes),
             size: bytes.len() as u64,
@@ -253,16 +336,27 @@ impl ProjectStateTransport for MockStateTransport {
                 "verify requires at least one path",
             ));
         }
-        let state = self.lock();
-        if state.head.as_deref() != Some(commit) {
-            return Err(StateBrokerError::not_found(
-                "commit is not the current state head in the mock",
-            ));
+        if paths.len() > MAX_VERIFY_PATHS {
+            return Err(StateBrokerError::invalid_input(format!(
+                "at most {MAX_VERIFY_PATHS} paths may be verified per request"
+            )));
         }
+        let state = self.lock();
+        let Some(snapshot) = state.history.get(commit) else {
+            return Err(StateBrokerError::not_found(
+                "commit is not a known commit in the mock",
+            ));
+        };
+        let mut seen = std::collections::HashSet::new();
         let mut entries = Vec::with_capacity(paths.len());
         for path in paths {
             validate_logical_path(path)?;
-            let entry = state.files.get(path).map_or_else(
+            if !seen.insert(path.as_str()) {
+                return Err(StateBrokerError::invalid_input(format!(
+                    "duplicate path in verify request: {path}"
+                )));
+            }
+            let entry = snapshot.files.get(path).map_or_else(
                 || VerifiedEntry {
                     path: path.clone(),
                     present: false,
@@ -330,8 +424,15 @@ impl ProjectStateTransport for MockStateTransport {
         }
 
         state.head = Some(commit.clone());
-        state.message = Some(message.clone());
         state.commits += 1;
+        let snapshot = state.files.clone();
+        state.history.insert(
+            commit.clone(),
+            MockCommit {
+                message: message.clone(),
+                files: snapshot,
+            },
+        );
         Ok(CommitOutcome {
             state_ref: format!("refs/heads/projects/{}/state", state.project_uuid),
             commit: commit.clone(),
@@ -401,6 +502,10 @@ mod tests {
             mock.file_bytes("checkpoints/first.json").unwrap(),
             br#"{"ok":true}"#
         );
+        assert_eq!(
+            mock.commit_message(&outcome.commit).unwrap(),
+            outcome.message
+        );
     }
 
     #[test]
@@ -437,5 +542,69 @@ mod tests {
         );
         assert!(!entries[1].present);
         assert!(!entries[1].is_verified());
+    }
+
+    /// The mock must read any known commit the way the broker does, not only
+    /// the head (prior review: mock fidelity divergence).
+    #[test]
+    fn historical_verify_and_blob_reads_serve_old_commits() {
+        let mock = MockStateTransport::with_files(UUID, [("a.json", b"one".to_vec())]);
+        let first = mock.head().unwrap();
+        mock.commit(&CommitRequest::single(
+            "b.json",
+            b"two".to_vec(),
+            Some(first.clone()),
+            "add b",
+            None,
+        ))
+        .unwrap();
+
+        let entries = mock
+            .verify(&first, &["a.json".to_string(), "b.json".to_string()])
+            .unwrap();
+        assert!(entries[0].is_verified());
+        assert!(!entries[1].present, "b.json did not exist at the first commit");
+
+        let blob = mock.read_blob("a.json", Some(&first)).unwrap();
+        assert_eq!(blob.commit, first, "the blob must report the commit it was read at");
+        assert_eq!(blob.bytes().unwrap(), b"one");
+
+        let unknown = mock.verify(&"c".repeat(40), &["a.json".to_string()]);
+        assert_eq!(unknown.unwrap_err().code(), BrokerErrorCode::NotFound);
+    }
+
+    #[test]
+    fn verify_rejects_duplicate_and_overlong_path_lists() {
+        let mock = MockStateTransport::with_files(UUID, [("a.json", b"one".to_vec())]);
+        let head = mock.head().unwrap();
+        let duplicate = mock
+            .verify(&head, &["a.json".to_string(), "a.json".to_string()])
+            .unwrap_err();
+        assert_eq!(duplicate.code(), BrokerErrorCode::InvalidInput);
+
+        let too_many: Vec<String> = (0..=MAX_VERIFY_PATHS)
+            .map(|index| format!("f{index}.json"))
+            .collect();
+        let error = mock.verify(&head, &too_many).unwrap_err();
+        assert_eq!(error.code(), BrokerErrorCode::InvalidInput);
+    }
+
+    #[test]
+    fn injected_read_state_failure_is_consumed_once() {
+        let mock = MockStateTransport::with_files(UUID, [("a.json", b"one".to_vec())]);
+        mock.fail_next_read_state(StateBrokerError::transport("boom", true));
+        assert!(mock.read_state().is_err());
+        assert!(mock.read_state().is_ok());
+    }
+
+    #[test]
+    fn ref_deletion_removes_the_head_but_keeps_history() {
+        let mock = MockStateTransport::with_files(UUID, [("a.json", b"one".to_vec())]);
+        let head = mock.head().unwrap();
+        mock.inject_ref_deletion();
+        assert!(mock.head().is_none());
+        assert!(mock.read_state().unwrap().state.head.is_none());
+        assert!(mock.file_bytes("a.json").is_none());
+        assert_eq!(mock.file_bytes_at("a.json", &head).unwrap(), b"one");
     }
 }

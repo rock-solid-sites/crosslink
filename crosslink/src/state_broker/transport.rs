@@ -1,7 +1,17 @@
-//! The narrow transport seam between Crosslink and a durable project-state
-//! backend.
+//! Durable-state transport seam for the deployed broker contract v1.
 //!
-//! # Why this trait exists
+//! # What this trait is (and is not)
+//!
+//! This trait is a **broker-v1-shaped CAS transport**: whole-tree
+//! `expected_head`, 40-hex commit shas, `Broker-Op:` trailer reconciliation,
+//! exact-commit read-back verification. It is the candidate seam for
+//! Crosslink's durable-state operations, but the mapping between Crosslink's
+//! v3 per-agent refs and the broker's single state tree is an **open design
+//! decision** (`.design/state-broker-transport.md` §4); nothing here pre-answers
+//! it. A substitute backend must reproduce the broker's CAS vocabulary or the
+//! provided methods below do not apply to it.
+//!
+//! # Why the trait exists
 //!
 //! Recon of the existing persistence boundaries found no single abstraction
 //! spanning durable-state *read* and *mutation*:
@@ -12,9 +22,6 @@
 //! - [`crate::sync::SyncManager`] owns remote fetch/push but is the git
 //!   transport itself.
 //!
-//! This trait is the minimum change: it names the five semantic operations a
-//! durable state backend must provide, with exactly the broker v1 contract's
-//! semantics (expected-head CAS, typed `stale_state`, read-back verification).
 //! The existing local/direct git behavior is untouched; adopting the broker is
 //! opt-in (see [`crate::state_broker::config::StateBackend`]).
 //!
@@ -22,28 +29,54 @@
 //!
 //! - [`crate::state_broker::client::StateBrokerClient`] — the deployed broker.
 //! - [`crate::state_broker::mock::MockStateTransport`] — deterministic
-//!   in-memory broker with identical CAS semantics, for tests and dry runs.
+//!   in-memory broker with matching CAS/history semantics, for tests and dry
+//!   runs.
+//!
+//! # Op-id semantics (the reconciliation contract)
+//!
+//! Every write that may need reconciliation carries a caller-chosen `op_id`;
+//! the broker records it in a `Broker-Op:` trailer. On a conflict or an
+//! ambiguous failure, Crosslink distinguishes four cases:
+//!
+//! | Case | Detection | Verdict |
+//! |---|---|---|
+//! | **stale conflict** | `stale_state` and the head does not record our op id | rebase only after proving non-overlap, else [`CasResolution::ReconcileRequired`] |
+//! | **replay** | the head records our op id and every path matches the intended payload | [`CasResolution::AlreadyApplied`] (nothing written) |
+//! | **same op id, different content** | the head records our op id but a digest differs | [`CasResolution::ReconcileRequired`] with [`ReconcileReason::OpIdReusedWithDifferentContent`] |
+//! | **ambiguous write** | timeout/upstream/`verified: false` | [`CasResolution::ReconcileRequired`] with [`ReconcileReason::AmbiguousWrite`] |
+//!
+//! `op_id` uniqueness is a caller obligation: one op id must identify exactly
+//! one intended payload for one writer. Reuse with different content is
+//! *detected*, never accepted.
+//!
+//! # Automatic rebase is refused unless non-overlap is proven
+//!
+//! `commit_cas` re-issues whole-file upserts. Re-issuing them against a moved
+//! head is only safe when the intervening commits provably did not touch any
+//! requested path (or already wrote exactly the intended payload). The proof
+//! compares per-path digests at the base and observed heads; when it cannot be
+//! made, the call returns [`CasResolution::ReconcileRequired`] instead of
+//! silently discarding a competing writer's bytes.
 //!
 //! # Local projections are disposable
 //!
 //! [`ProjectStateTransport::hydrate_into`] materializes durable state blobs
 //! into a caller-chosen directory. That directory is a **cache**: it is never
 //! the source of truth, it is not committed, and deleting it loses nothing.
-//! The durable head is always re-read from the backend.
+//! The durable head is always re-read from the backend. Every projection
+//! carries an identity/freshness marker; consumers verify it with
+//! [`ProjectStateTransport::verify_projection`] before treating a projection as
+//! current (see [`crate::state_broker::projection`]).
 
+use std::collections::HashMap;
 use std::path::Path;
 
 use super::client::{
     CommitOutcome, CommitRequest, ProjectState, StateBlob, StateBrokerClient, VerifiedEntry,
     VerifiedFile,
 };
-use super::config::StateBrokerConfig;
-// `BrokerErrorCode` is referenced by intra-doc links below; imported for
-// rustdoc even though no code in this module names it.
-#[allow(unused_imports)]
-use super::error::BrokerErrorCode;
 use super::error::StateBrokerError;
-use super::validate::{projection_relative_path, validate_logical_path};
+use super::projection::{self, ProjectionMarker};
 
 /// Outcome of materializing durable state into a disposable local directory.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -57,22 +90,175 @@ pub struct ProjectionReport {
     pub files: Vec<String>,
     /// Total bytes written.
     pub bytes: u64,
+    /// Identity/freshness marker written beside the projection (`None` when
+    /// there was no durable state and nothing was written).
+    pub marker: Option<ProjectionMarker>,
+}
+
+/// Why automatic CAS reconciliation stopped.
+///
+/// Every variant means "do not treat this as an ordinary success or an
+/// ordinary retry"; see [`CasResolution::ReconcileRequired`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReconcileReason {
+    /// The write may or may not have landed (timeout, lost response,
+    /// unparseable response, upstream read-back mismatch, `verified: false`).
+    AmbiguousWrite {
+        /// What did not resolve.
+        detail: String,
+    },
+    /// Reconciliation determined that the write is not at the current head.
+    /// Callers may retry the same payload after re-reading state.
+    WriteNotLanded,
+    /// The head records our `op_id` but carries different content: the op id
+    /// was reused for another payload, or our payload was overwritten later.
+    OpIdReusedWithDifferentContent,
+    /// A competing commit changed one or more of the paths this request would
+    /// replace; rebasing would discard that writer's bytes.
+    OverlappingPaths {
+        /// The paths whose observed content changed and does not match the
+        /// intended payload.
+        paths: Vec<String>,
+    },
+    /// Non-overlap could not be proven (historical digests unreadable, or the
+    /// state ref disappeared).
+    OverlapUnprovable {
+        /// What could not be proven, or why it could not be read.
+        detail: String,
+    },
+    /// The durable head moved while the verdict was being computed, so no
+    /// verdict can be vouched for at the head the caller will act on.
+    HeadMovedDuringReconcile,
+}
+
+impl ReconcileReason {
+    /// Stable machine-readable label (used in error `details.reason`).
+    #[must_use]
+    pub const fn label(&self) -> &'static str {
+        match self {
+            Self::AmbiguousWrite { .. } => "ambiguous_write",
+            Self::WriteNotLanded => "write_not_landed",
+            Self::OpIdReusedWithDifferentContent => "op_id_reused_with_different_content",
+            Self::OverlappingPaths { .. } => "overlapping_paths",
+            Self::OverlapUnprovable { .. } => "overlap_unprovable",
+            Self::HeadMovedDuringReconcile => "head_moved_during_reconcile",
+        }
+    }
 }
 
 /// Outcome of a reconciled compare-and-swap commit.
+///
+/// Only [`Self::Applied`] and [`Self::AlreadyApplied`] are success shapes, and
+/// both imply content-verified state: a transport result carrying
+/// `verified: false`, or a rebase that cannot be proven safe, is never
+/// representable as success — it becomes [`Self::ReconcileRequired`].
 #[derive(Debug, Clone)]
-pub struct CasResolution {
-    /// The broker commit outcome (the landed commit).
-    pub outcome: CommitOutcome,
-    /// `true` when a `stale_state` conflict was resolved by discovering that
-    /// *our own* op id already produced the current head — i.e. the write had
-    /// already landed and nothing new was written.
-    pub already_applied: bool,
-    /// Number of broker `commit` attempts made (1 = no conflict).
-    pub attempts: u8,
+pub enum CasResolution {
+    /// Our CAS write landed and the read-back verified the payload.
+    Applied {
+        /// The broker's commit outcome (`verified` is always `true` here).
+        outcome: CommitOutcome,
+        /// Broker `commit` calls made (1 = no conflict).
+        attempts: u8,
+    },
+    /// The durable head already recorded our `op_id` with exactly the intended
+    /// payload; nothing new was written.
+    AlreadyApplied {
+        /// The head commit that already carries our write.
+        commit: String,
+        /// That commit's message (including broker trailers).
+        message: String,
+        /// Per-path read-back digests compared against the intended payload.
+        files: Vec<VerifiedFile>,
+        /// Broker `commit` calls made.
+        attempts: u8,
+    },
+    /// The write must not be treated as an ordinary success or retried
+    /// blindly: reconcile explicitly by `op_id` and re-read state.
+    ReconcileRequired {
+        /// Why automatic reconciliation stopped.
+        reason: ReconcileReason,
+        /// The head observed when reconciliation stopped, when known.
+        observed_head: Option<String>,
+        /// Per-path digests gathered during reconciliation, when available.
+        files: Vec<VerifiedFile>,
+        /// Broker `commit` calls made.
+        attempts: u8,
+    },
 }
 
-/// Semantic durable-state operations Crosslink requires from a state backend.
+impl CasResolution {
+    /// Broker `commit` calls made (1 = the first attempt succeeded).
+    #[must_use]
+    pub const fn attempts(&self) -> u8 {
+        match self {
+            Self::Applied { attempts, .. }
+            | Self::AlreadyApplied { attempts, .. }
+            | Self::ReconcileRequired { attempts, .. } => *attempts,
+        }
+    }
+
+    /// Whether this resolution vouches for content-verified state.
+    #[must_use]
+    pub const fn is_verified(&self) -> bool {
+        matches!(self, Self::Applied { .. } | Self::AlreadyApplied { .. })
+    }
+
+    /// The commit of a verified resolution, when there is one.
+    #[must_use]
+    pub fn commit(&self) -> Option<&str> {
+        match self {
+            Self::Applied { outcome, .. } => Some(outcome.commit.as_str()),
+            Self::AlreadyApplied { commit, .. } => Some(commit.as_str()),
+            Self::ReconcileRequired { .. } => None,
+        }
+    }
+
+    /// The broker commit outcome of an [`Self::Applied`] resolution.
+    #[must_use]
+    pub const fn applied_outcome(&self) -> Option<&CommitOutcome> {
+        match self {
+            Self::Applied { outcome, .. } => Some(outcome),
+            Self::AlreadyApplied { .. } | Self::ReconcileRequired { .. } => None,
+        }
+    }
+}
+
+/// What explicit op-id reconciliation concluded about a write.
+///
+/// This is the "landed / not landed / same-op-different-content" trichotomy
+/// callers can use when a raw [`ProjectStateTransport::commit`] fails
+/// ambiguously.
+#[derive(Debug, Clone)]
+pub enum OpReconciliation {
+    /// The durable head records our `op_id` and every requested path carries
+    /// exactly the intended content.
+    Landed {
+        /// Head commit that records the op.
+        commit: String,
+        /// That commit's message.
+        message: String,
+        /// Per-path digests compared against the intended payload.
+        files: Vec<VerifiedFile>,
+    },
+    /// The durable head records our `op_id` but the content differs (reused op
+    /// id, or a later overwrite).
+    LandedWithDifferentContent {
+        /// Head commit that records the op.
+        commit: String,
+        /// That commit's message.
+        message: String,
+        /// Per-path digests compared against the intended payload.
+        files: Vec<VerifiedFile>,
+    },
+    /// The durable head does not record our `op_id`.
+    NotLanded {
+        /// The head observed (`None` when the ref does not exist).
+        observed_head: Option<String>,
+    },
+}
+
+/// CAS transport operations for a durable project-state backend.
 ///
 /// All methods are synchronous: the broker client uses a blocking HTTP client,
 /// matching Crosslink's CLI (and `sync`) execution model.
@@ -92,6 +278,9 @@ pub trait ProjectStateTransport {
     /// [`BrokerErrorCode::InvalidInput`] for a bad path/ref;
     /// [`BrokerErrorCode::NotFound`] when the file does not exist at that
     /// commit; plus transport/protocol failures.
+    ///
+    /// [`BrokerErrorCode::InvalidInput`]: super::error::BrokerErrorCode::InvalidInput
+    /// [`BrokerErrorCode::NotFound`]: super::error::BrokerErrorCode::NotFound
     fn read_blob(&self, path: &str, at: Option<&str>) -> Result<StateBlob, StateBrokerError>;
 
     /// Read back digests for `paths` at an exact commit.
@@ -100,6 +289,8 @@ pub trait ProjectStateTransport {
     ///
     /// [`BrokerErrorCode::InvalidInput`] for a bad commit/paths, plus
     /// transport/protocol failures.
+    ///
+    /// [`BrokerErrorCode::InvalidInput`]: super::error::BrokerErrorCode::InvalidInput
     fn verify(
         &self,
         commit: &str,
@@ -108,12 +299,18 @@ pub trait ProjectStateTransport {
 
     /// Submit one compare-and-swap mutation. Never blind-retried.
     ///
+    /// An `Ok` outcome whose `verified` flag is `false` must be treated as an
+    /// ambiguous write ([`ReconcileReason::AmbiguousWrite`]); the provided
+    /// [`Self::commit_cas`] does exactly that.
+    ///
     /// # Errors
     ///
     /// [`BrokerErrorCode::StaleState`] when `expected_head` does not match the
-    /// observed head (nothing was written); `upstream_error` with a commit sha
-    /// in `details` when the broker's read-back disagreed; plus
-    /// transport/protocol failures.
+    /// observed head (nothing was written); [`BrokerErrorCode::ReconcileRequired`]
+    /// when the response was ambiguous; plus transport/protocol failures.
+    ///
+    /// [`BrokerErrorCode::StaleState`]: super::error::BrokerErrorCode::StaleState
+    /// [`BrokerErrorCode::ReconcileRequired`]: super::error::BrokerErrorCode::ReconcileRequired
     fn commit(&self, request: &CommitRequest) -> Result<CommitOutcome, StateBrokerError>;
 
     /// The current durable head commit, or `None` when the project has no
@@ -132,115 +329,136 @@ pub trait ProjectStateTransport {
     /// named paths (each validated). A project with no durable state writes
     /// nothing and returns a report with `commit: None`.
     ///
+    /// On success the directory carries an identity/freshness marker recording
+    /// the project, the state ref, the head commit, and the digest of every
+    /// projected file. The marker is written *incomplete* before the first
+    /// file, so an interrupted hydration can never look complete. The write is
+    /// an upsert: files listed by a previous marker but absent from this
+    /// selection are removed.
+    ///
     /// # Errors
     ///
     /// [`BrokerErrorCode::InvalidInput`] for unsafe paths,
-    /// [`BrokerErrorCode::LocalIo`] when writing fails, plus the read errors of
-    /// [`Self::read_blob`].
+    /// [`BrokerErrorCode::IdentityMismatch`] when `dir` already holds a
+    /// projection of a different project, [`BrokerErrorCode::LocalIo`] when
+    /// writing fails, [`BrokerErrorCode::Protocol`] when a blob's identity
+    /// disagrees with the inventory (path/commit/blob sha/size), plus the read
+    /// errors of [`Self::read_blob`].
+    ///
+    /// [`BrokerErrorCode::InvalidInput`]: super::error::BrokerErrorCode::InvalidInput
+    /// [`BrokerErrorCode::IdentityMismatch`]: super::error::BrokerErrorCode::IdentityMismatch
+    /// [`BrokerErrorCode::LocalIo`]: super::error::BrokerErrorCode::LocalIo
+    /// [`BrokerErrorCode::Protocol`]: super::error::BrokerErrorCode::Protocol
     fn hydrate_into(
         &self,
         dir: &Path,
         paths: Option<&[String]>,
     ) -> Result<ProjectionReport, StateBrokerError> {
-        let state = self.read_state()?;
-        let Some(head) = state.state.head else {
-            return Ok(ProjectionReport {
-                commit: None,
-                root: dir.to_path_buf(),
-                files: Vec::new(),
-                bytes: 0,
-            });
-        };
-
-        let selected: Vec<String> = match paths {
-            Some([]) => {
-                return Err(StateBrokerError::invalid_input(
-                    "hydrate path list must not be empty (use None for the full inventory)",
-                ));
-            }
-            Some(list) => {
-                for path in list {
-                    validate_logical_path(path)?;
-                }
-                list.to_vec()
-            }
-            None => state
-                .state
-                .entries
-                .iter()
-                .map(|entry| entry.path.clone())
-                .collect(),
-        };
-
-        std::fs::create_dir_all(dir).map_err(|e| {
-            StateBrokerError::local_io(format!(
-                "cannot create projection directory {}: {e}",
-                dir.display()
-            ))
-        })?;
-
-        let mut report = ProjectionReport {
-            commit: Some(head.commit.clone()),
-            root: dir.to_path_buf(),
-            files: Vec::with_capacity(selected.len()),
-            bytes: 0,
-        };
-        for path in selected {
-            let blob = self.read_blob(&path, Some(&head.commit))?;
-            let bytes = blob.bytes()?;
-            let relative = projection_relative_path(&path)?;
-            let target = dir.join(&relative);
-            if let Some(parent) = target.parent() {
-                std::fs::create_dir_all(parent).map_err(|e| {
-                    StateBrokerError::local_io(format!(
-                        "cannot create projection directory {}: {e}",
-                        parent.display()
-                    ))
-                })?;
-            }
-            std::fs::write(&target, &bytes).map_err(|e| {
-                StateBrokerError::local_io(format!(
-                    "cannot write projection file {}: {e}",
-                    target.display()
-                ))
-            })?;
-            report.bytes += bytes.len() as u64;
-            report.files.push(path);
-        }
-        Ok(report)
+        projection::hydrate(self, dir, paths)
     }
 
-    /// Submit a mutation through the expected-head/CAS path, reconciling at
-    /// most `max_retries` `stale_state` conflicts.
+    /// Verify that `dir` holds a complete projection of the transport's
+    /// *current* durable head, returning its marker.
     ///
-    /// Reconciliation is deliberately conservative:
+    /// This is the fail-closed gate for consumers: a missing, incomplete,
+    /// stale, unreadable, or wrong-project projection is an error, never
+    /// silently "current".
     ///
-    /// 1. On `stale_state`, re-read the durable head once.
-    /// 2. If the head commit's trailers record **our own `op_id`**, the write
-    ///    already landed: verify our paths at that head and return
-    ///    [`CasResolution::already_applied`] without writing again.
-    /// 3. Otherwise re-issue with the freshly observed head.
+    /// # Errors
     ///
-    /// This is only safe for whole-file upserts (the request content is
-    /// idempotent); append-style mutations must use [`Self::commit`] directly
-    /// and reconcile explicitly. `op_id` is required.
+    /// [`BrokerErrorCode::LocalIo`] for a missing/incomplete/stale/integrity
+    /// failure, [`BrokerErrorCode::IdentityMismatch`] for another project, plus
+    /// the read errors of [`Self::read_state`].
+    ///
+    /// [`BrokerErrorCode::LocalIo`]: super::error::BrokerErrorCode::LocalIo
+    /// [`BrokerErrorCode::IdentityMismatch`]: super::error::BrokerErrorCode::IdentityMismatch
+    fn verify_projection(&self, dir: &Path) -> Result<ProjectionMarker, StateBrokerError> {
+        projection::verify_projection(self, dir)
+    }
+
+    /// Reconcile a possibly-ambiguous write by `op_id`: read the durable head,
+    /// check whether it records our op id, and compare read-back digests
+    /// against the intended payload.
+    ///
+    /// Returns the landed/not-landed/different-content verdict. Read failures
+    /// are surfaced as errors — a caller that cannot read state cannot
+    /// conclude anything.
     ///
     /// # Errors
     ///
     /// [`BrokerErrorCode::InvalidInput`] when `op_id` is absent, plus the
-    /// errors of [`Self::read_state`], [`Self::verify`], and [`Self::commit`]
-    /// (typically the final `stale_state` when retries are exhausted).
+    /// errors of [`Self::read_state`] and [`Self::verify`].
+    ///
+    /// [`BrokerErrorCode::InvalidInput`]: super::error::BrokerErrorCode::InvalidInput
+    fn reconcile(&self, request: &CommitRequest) -> Result<OpReconciliation, StateBrokerError> {
+        let Some(op_id) = request.op_id.as_deref() else {
+            return Err(StateBrokerError::invalid_input(
+                "reconcile requires op_id: without it a write cannot be attributed",
+            ));
+        };
+        let state = self.read_state()?;
+        let Some(head) = state.state.head else {
+            return Ok(OpReconciliation::NotLanded {
+                observed_head: None,
+            });
+        };
+        if !message_records_op(&head.message, op_id) {
+            return Ok(OpReconciliation::NotLanded {
+                observed_head: Some(head.commit),
+            });
+        }
+        let files = verify_intended_content(self, &head.commit, request)?;
+        if files.iter().all(|file| file.verified) {
+            Ok(OpReconciliation::Landed {
+                commit: head.commit,
+                message: head.message,
+                files,
+            })
+        } else {
+            Ok(OpReconciliation::LandedWithDifferentContent {
+                commit: head.commit,
+                message: head.message,
+                files,
+            })
+        }
+    }
+
+    /// Submit a mutation through the expected-head/CAS path, reconciling at
+    /// most `max_retries` conflicts/ambiguous failures.
+    ///
+    /// Reconciliation is deliberately conservative:
+    ///
+    /// 1. On `stale_state` or an ambiguous write, reconcile by `op_id`: if the
+    ///    head records our op id, compare digests against the intended payload
+    ///    and return [`CasResolution::AlreadyApplied`] only when every file
+    ///    matches; a mismatch is [`CasResolution::ReconcileRequired`].
+    /// 2. Otherwise (the write is not at the head), re-issue **only after
+    ///    proving non-overlap** between the base head and the observed head for
+    ///    every requested path. Unprovable or overlapping rebases are refused
+    ///    with [`CasResolution::ReconcileRequired`], never written.
+    ///
+    /// This is safe for whole-file upserts whose intervening commits provably
+    /// did not touch the requested paths; append-style mutations must use
+    /// [`Self::commit`] directly and reconcile explicitly. `op_id` is required.
+    ///
+    /// # Errors
+    ///
+    /// [`BrokerErrorCode::InvalidInput`] when `op_id` is absent, plus the
+    /// errors of [`Self::read_state`] and [`Self::commit`] (typically the final
+    /// `stale_state` when retries are exhausted and nothing landed).
+    ///
+    /// [`BrokerErrorCode::InvalidInput`]: super::error::BrokerErrorCode::InvalidInput
     fn commit_cas(
         &self,
         request: &CommitRequest,
         max_retries: u8,
     ) -> Result<CasResolution, StateBrokerError> {
-        let Some(op_id) = request.op_id.clone() else {
+        if request.op_id.is_none() {
             return Err(StateBrokerError::invalid_input(
                 "commit_cas requires op_id so a stale_state conflict can be reconciled; \
                  use commit() for a single unretried attempt",
             ));
-        };
+        }
 
         let mut expected_head = request.expected_head.clone();
         let mut attempt: u8 = 0;
@@ -248,74 +466,142 @@ pub trait ProjectStateTransport {
             let mut current = request.clone();
             current.expected_head.clone_from(&expected_head);
             match self.commit(&current) {
-                Ok(outcome) => {
-                    return Ok(CasResolution {
+                Ok(outcome) if outcome.verified => {
+                    return Ok(CasResolution::Applied {
                         outcome,
-                        already_applied: false,
                         attempts: attempt.saturating_add(1),
                     });
                 }
-                Err(error) if error.is_stale_state() && attempt < max_retries => {
-                    let state = self.read_state()?;
-                    let head = state.state.head.clone();
-                    if let Some(head) = &head {
-                        if message_records_op(&head.message, &op_id) {
-                            // The op-id trailer says this head came from our
-                            // operation, but only a content comparison proves
-                            // the head still carries the payload we intended:
-                            // a reused op id (or any later overwrite) must not
-                            // be reported as a verified write.
-                            let intended: std::collections::HashMap<&str, (String, u64)> = request
-                                .files
-                                .iter()
-                                .map(|file| {
-                                    (
-                                        file.path.as_str(),
-                                        (
-                                            super::digest::sha256_hex(&file.content),
-                                            file.content.len() as u64,
-                                        ),
-                                    )
-                                })
-                                .collect();
-                            let entries = self.verify(&head.commit, &request.paths())?;
-                            let files: Vec<VerifiedFile> = entries
-                                .into_iter()
-                                .map(|entry| {
-                                    let verified = intended.get(entry.path.as_str()).is_some_and(
-                                        |(expected_sha, expected_size)| {
-                                            entry.sha256.as_deref() == Some(expected_sha.as_str())
-                                                && entry.size == Some(*expected_size)
-                                        },
-                                    );
-                                    VerifiedFile {
-                                        path: entry.path,
-                                        blob_sha: entry.blob_sha,
-                                        sha256: entry.sha256,
-                                        size: entry.size,
-                                        verified,
-                                    }
-                                })
-                                .collect();
-                            let verified = files.iter().all(|file| file.verified);
-                            return Ok(CasResolution {
-                                outcome: CommitOutcome {
-                                    state_ref: state.state.state_ref,
-                                    commit: head.commit.clone(),
-                                    previous_head: None,
-                                    head_after: Some(head.commit.clone()),
-                                    message: head.message.clone(),
-                                    op_id: Some(op_id),
-                                    files,
-                                    verified,
+                Ok(outcome) => {
+                    // A transport that returns an unverified outcome must not be
+                    // treated as success; the write may have landed partially.
+                    return Ok(CasResolution::ReconcileRequired {
+                        reason: ReconcileReason::AmbiguousWrite {
+                            detail: format!(
+                                "transport returned an unverified commit outcome for {}",
+                                outcome.commit
+                            ),
+                        },
+                        observed_head: outcome
+                            .head_after
+                            .clone()
+                            .or_else(|| Some(outcome.commit.clone())),
+                        files: outcome.files,
+                        attempts: attempt.saturating_add(1),
+                    });
+                }
+                Err(error) if error.is_stale_state() || error.is_reconcile_required() => {
+                    let stale = error.is_stale_state();
+                    let verdict = match self.reconcile(&current) {
+                        Ok(verdict) => verdict,
+                        Err(reconcile_error) => {
+                            return Ok(CasResolution::ReconcileRequired {
+                                reason: ReconcileReason::AmbiguousWrite {
+                                    detail: format!(
+                                        "reconciliation could not read the durable state: {}",
+                                        reconcile_error.message()
+                                    ),
                                 },
-                                already_applied: true,
+                                observed_head: None,
+                                files: Vec::new(),
                                 attempts: attempt.saturating_add(1),
                             });
                         }
+                    };
+                    match verdict {
+                        OpReconciliation::Landed {
+                            commit,
+                            message,
+                            files,
+                        } => {
+                            let observed = match self.current_head() {
+                                Ok(head) => head,
+                                Err(recheck_error) => {
+                                    return Ok(CasResolution::ReconcileRequired {
+                                        reason: ReconcileReason::AmbiguousWrite {
+                                            detail: format!(
+                                                "the write landed at {commit} but the current head \
+                                                 could not be re-read: {}",
+                                                recheck_error.message()
+                                            ),
+                                        },
+                                        observed_head: None,
+                                        files,
+                                        attempts: attempt.saturating_add(1),
+                                    });
+                                }
+                            };
+                            if observed.as_deref() != Some(commit.as_str()) {
+                                return Ok(CasResolution::ReconcileRequired {
+                                    reason: ReconcileReason::HeadMovedDuringReconcile,
+                                    observed_head: observed,
+                                    files,
+                                    attempts: attempt.saturating_add(1),
+                                });
+                            }
+                            return Ok(CasResolution::AlreadyApplied {
+                                commit,
+                                message,
+                                files,
+                                attempts: attempt.saturating_add(1),
+                            });
+                        }
+                        OpReconciliation::LandedWithDifferentContent {
+                            commit,
+                            message: _,
+                            files,
+                        } => {
+                            return Ok(CasResolution::ReconcileRequired {
+                                reason: ReconcileReason::OpIdReusedWithDifferentContent,
+                                observed_head: Some(commit),
+                                files,
+                                attempts: attempt.saturating_add(1),
+                            });
+                        }
+                        OpReconciliation::NotLanded { observed_head } => {
+                            if attempt >= max_retries {
+                                return if stale {
+                                    // stale_state guarantees the broker wrote
+                                    // nothing, so the typed error is truthful.
+                                    Err(error)
+                                } else {
+                                    Ok(CasResolution::ReconcileRequired {
+                                        reason: ReconcileReason::WriteNotLanded,
+                                        observed_head,
+                                        files: Vec::new(),
+                                        attempts: attempt.saturating_add(1),
+                                    })
+                                };
+                            }
+                            match prove_non_overlap(
+                                self,
+                                expected_head.as_deref(),
+                                observed_head.as_deref(),
+                                request,
+                            ) {
+                                RebaseProof::Proven => {
+                                    expected_head = observed_head;
+                                    attempt = attempt.saturating_add(1);
+                                }
+                                RebaseProof::Overlap(paths) => {
+                                    return Ok(CasResolution::ReconcileRequired {
+                                        reason: ReconcileReason::OverlappingPaths { paths },
+                                        observed_head,
+                                        files: Vec::new(),
+                                        attempts: attempt.saturating_add(1),
+                                    });
+                                }
+                                RebaseProof::Unprovable(detail) => {
+                                    return Ok(CasResolution::ReconcileRequired {
+                                        reason: ReconcileReason::OverlapUnprovable { detail },
+                                        observed_head,
+                                        files: Vec::new(),
+                                        attempts: attempt.saturating_add(1),
+                                    });
+                                }
+                            }
+                        }
                     }
-                    expected_head = head.map(|head| head.commit);
-                    attempt = attempt.saturating_add(1);
                 }
                 Err(error) => return Err(error),
             }
@@ -332,6 +618,170 @@ pub fn message_records_op(message: &str, op_id: &str) -> bool {
     message
         .lines()
         .any(|line| line.trim_end().trim_start() == expected)
+}
+
+/// Intended payload digests, keyed by logical path.
+fn intended_digests(request: &CommitRequest) -> HashMap<&str, (String, u64)> {
+    request
+        .files
+        .iter()
+        .map(|file| {
+            (
+                file.path.as_str(),
+                (
+                    super::digest::sha256_hex(&file.content),
+                    file.content.len() as u64,
+                ),
+            )
+        })
+        .collect()
+}
+
+/// Whether a read-back entry matches the intended payload for `path`.
+fn matches_intended(
+    entry: &VerifiedEntry,
+    intended: &HashMap<&str, (String, u64)>,
+    path: &str,
+) -> bool {
+    entry.present
+        && entry.sha256.as_deref().is_some_and(|sha| {
+            intended
+                .get(path)
+                .is_some_and(|(expected_sha, expected_size)| {
+                    sha == expected_sha && entry.size == Some(*expected_size)
+                })
+        })
+}
+
+/// Read back digests at `commit` and mark each entry verified only when it
+/// matches the intended payload.
+fn verify_intended_content<T>(
+    transport: &T,
+    commit: &str,
+    request: &CommitRequest,
+) -> Result<Vec<VerifiedFile>, StateBrokerError>
+where
+    T: ProjectStateTransport + ?Sized,
+{
+    let intended = intended_digests(request);
+    let entries = transport.verify(commit, &request.paths())?;
+    Ok(entries
+        .into_iter()
+        .map(|entry| {
+            let verified = matches_intended(&entry, &intended, entry.path.as_str());
+            VerifiedFile {
+                path: entry.path,
+                blob_sha: entry.blob_sha,
+                sha256: entry.sha256,
+                size: entry.size,
+                verified,
+            }
+        })
+        .collect())
+}
+
+/// Result of proving that re-issuing whole-file upserts over a moved head is
+/// lossless.
+enum RebaseProof {
+    /// No requested path was touched by the intervening commits (or the
+    /// observed content already equals the intended payload).
+    Proven,
+    /// These requested paths changed and do not match the intended payload.
+    Overlap(Vec<String>),
+    /// The proof could not be made (historical digests unreadable, or the ref
+    /// disappeared).
+    Unprovable(String),
+}
+
+/// Prove that every path in `request` is either unchanged between `base_head`
+/// and `observed_head`, or already carries exactly the intended payload.
+///
+/// `base_head = None` means "the base was an absent ref", so every path was
+/// absent at the base.
+fn prove_non_overlap<T>(
+    transport: &T,
+    base_head: Option<&str>,
+    observed_head: Option<&str>,
+    request: &CommitRequest,
+) -> RebaseProof
+where
+    T: ProjectStateTransport + ?Sized,
+{
+    // A vanished ref cannot be proven non-overlapping: re-issuing would
+    // bootstrap a fresh single-commit history and erase the durable past.
+    let Some(observed_head) = observed_head else {
+        return RebaseProof::Unprovable(
+            "the state ref disappeared while reconciling; refusing to bootstrap over a deleted ref"
+                .to_string(),
+        );
+    };
+    let paths = request.paths();
+    let observed = match transport.verify(observed_head, &paths) {
+        Ok(entries) => index_entries(entries),
+        Err(error) => {
+            return RebaseProof::Unprovable(format!(
+                "cannot read the observed head's digests: {}",
+                error.message()
+            ));
+        }
+    };
+    let base = match base_head {
+        None => None,
+        Some(base_head) => match transport.verify(base_head, &paths) {
+            Ok(entries) => Some(index_entries(entries)),
+            Err(error) => {
+                return RebaseProof::Unprovable(format!(
+                    "cannot read the base head's digests: {}",
+                    error.message()
+                ));
+            }
+        },
+    };
+
+    let intended = intended_digests(request);
+    let mut overlap = Vec::new();
+    for path in &paths {
+        let base_entry = base
+            .as_ref()
+            .and_then(|entries| entries.get(path.as_str()));
+        let observed_entry = observed.get(path.as_str());
+        let base_present = base_entry.is_some_and(|entry| entry.present);
+        let observed_present = observed_entry.is_some_and(|entry| entry.present);
+
+        // Unchanged: present at both with equal digests, or absent at both.
+        if base_present == observed_present {
+            let unchanged = match (base_present, base_entry, observed_entry) {
+                (false, _, _) => true,
+                (true, Some(base_entry), Some(observed_entry)) => {
+                    base_entry.sha256 == observed_entry.sha256
+                        && base_entry.size == observed_entry.size
+                }
+                (true, _, _) => false,
+            };
+            if unchanged {
+                continue;
+            }
+        }
+        // Equivalent: the observed content already equals our intended payload,
+        // so re-issuing it cannot lose data.
+        if observed_entry.is_some_and(|entry| matches_intended(entry, &intended, path)) {
+            continue;
+        }
+        overlap.push(path.clone());
+    }
+    if overlap.is_empty() {
+        RebaseProof::Proven
+    } else {
+        RebaseProof::Overlap(overlap)
+    }
+}
+
+/// Index read-back entries by logical path.
+fn index_entries(entries: Vec<VerifiedEntry>) -> HashMap<String, VerifiedEntry> {
+    entries
+        .into_iter()
+        .map(|entry| (entry.path.clone(), entry))
+        .collect()
 }
 
 impl ProjectStateTransport for StateBrokerClient {
@@ -357,21 +807,6 @@ impl ProjectStateTransport for StateBrokerClient {
     }
 }
 
-/// Build a broker transport from the environment.
-///
-/// Returns `None` when no broker variable is present at all.
-///
-/// # Errors
-///
-/// [`BrokerErrorCode::Configuration`] for a partial/invalid environment, or
-/// when the HTTP client cannot be constructed.
-pub fn transport_from_env() -> Result<Option<StateBrokerClient>, StateBrokerError> {
-    StateBrokerConfig::from_env()?.map_or_else(
-        || Ok(None),
-        |config| StateBrokerClient::new(config).map(Some),
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -385,5 +820,39 @@ mod tests {
         // A caller message mentioning the trailer text is not a trailer line.
         assert!(!message_records_op("note: Broker-Op: codex-1", "codex-1"));
         assert!(!message_records_op("Broker-Op: codex-10", "codex-1"));
+    }
+
+    #[test]
+    fn reconcile_reason_labels_are_stable() {
+        assert_eq!(
+            ReconcileReason::AmbiguousWrite {
+                detail: String::new()
+            }
+            .label(),
+            "ambiguous_write"
+        );
+        assert_eq!(
+            ReconcileReason::OverlappingPaths { paths: vec![] }.label(),
+            "overlapping_paths"
+        );
+        assert_eq!(
+            ReconcileReason::OverlapUnprovable {
+                detail: String::new()
+            }
+            .label(),
+            "overlap_unprovable"
+        );
+        assert_eq!(
+            ReconcileReason::WriteNotLanded.label(),
+            "write_not_landed"
+        );
+        assert_eq!(
+            ReconcileReason::OpIdReusedWithDifferentContent.label(),
+            "op_id_reused_with_different_content"
+        );
+        assert_eq!(
+            ReconcileReason::HeadMovedDuringReconcile.label(),
+            "head_moved_during_reconcile"
+        );
     }
 }

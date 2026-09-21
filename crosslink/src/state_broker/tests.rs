@@ -1,19 +1,23 @@
-//! Cross-cutting unit tests for the broker transport: disposable projections,
-//! reconciled CAS, and feeding the existing hydration path from a broker
-//! projection.
+//! Cross-cutting unit tests for the broker transport: disposable projections
+//! with identity/freshness markers, reconciled CAS verdicts (including refused
+//! same-path rebases and ambiguous writes), and feeding the existing hydration
+//! path from a broker projection.
 
 use std::path::Path;
 
 use chrono::Utc;
+use serde_json::json;
 use uuid::Uuid;
 
 use super::client::CommitRequest;
-use super::config::StateBrokerConfig;
+use super::config::{default_projection_dir, StateBrokerConfig};
 use super::error::{BrokerErrorCode, StateBrokerError};
 use super::mock::MockStateTransport;
-use super::transport::ProjectStateTransport;
+use super::projection::{read_projection_marker, PROJECTION_MARKER_FILE};
+use super::transport::{CasResolution, OpReconciliation, ProjectStateTransport, ReconcileReason};
 
 const UUID: &str = "1d440dcf-bcbf-4d1a-987c-d5334568a716";
+const OTHER_UUID: &str = "2a551ed0-cdc0-4e2b-a98d-e6445679b827";
 
 fn bootstrap_mock() -> MockStateTransport {
     MockStateTransport::with_files(
@@ -28,11 +32,39 @@ fn bootstrap_mock() -> MockStateTransport {
     )
 }
 
+fn stale_error() -> StateBrokerError {
+    StateBrokerError::from_envelope(
+        BrokerErrorCode::StaleState,
+        "expected state head does not match the observed state head".to_string(),
+        true,
+        Some(json!({})),
+        Some(409),
+        None,
+        Some("state.commit".to_string()),
+    )
+}
+
+fn ambiguous_error() -> StateBrokerError {
+    StateBrokerError::reconcile_required(
+        "write outcome is unknown (transport_ambiguous); reconcile by op_id",
+        Some(json!({"reason": "transport_ambiguous", "op_id": "op-ours"})),
+    )
+}
+
+fn expect_reconcile_required(resolution: &CasResolution) -> &ReconcileReason {
+    match resolution {
+        CasResolution::ReconcileRequired { reason, .. } => reason,
+        other => panic!("expected ReconcileRequired, got {other:?}"),
+    }
+}
+
+// ── Projection identity and freshness ────────────────────────────────
+
 #[test]
-fn hydrate_into_writes_a_disposable_projection() {
+fn hydrate_into_writes_a_disposable_projection_with_a_marker() {
     let mock = bootstrap_mock();
     let dir = tempfile::tempdir().unwrap();
-    let root = dir.path().join("state-projection");
+    let root = default_projection_dir(dir.path());
 
     let report = mock.hydrate_into(&root, None).expect("hydrate");
     assert_eq!(report.commit.as_deref(), mock.head().as_deref());
@@ -42,6 +74,19 @@ fn hydrate_into_writes_a_disposable_projection() {
         std::fs::read(root.join("meta/counters.json")).unwrap(),
         br#"{"next_display_id":2,"next_comment_id":1}"#
     );
+
+    // The marker binds the projection to the project and head it came from.
+    let marker = read_projection_marker(&root).unwrap().expect("marker");
+    assert!(marker.complete);
+    assert_eq!(marker.project_uuid, UUID);
+    assert_eq!(marker.state_ref, mock.state_ref());
+    assert_eq!(marker.head_commit, mock.head().unwrap());
+    assert_eq!(marker.files.len(), 2);
+    assert_eq!(marker.bytes, report.bytes);
+    assert_eq!(report.marker.as_ref(), Some(&marker));
+
+    // The freshness gate accepts a projection of the current head.
+    assert_eq!(mock.verify_projection(&root).unwrap(), marker);
 
     // Disposable: deleting the projection loses nothing; the durable head is
     // still readable from the transport.
@@ -55,6 +100,7 @@ fn hydrate_into_without_durable_state_writes_nothing() {
     let dir = tempfile::tempdir().unwrap();
     let report = mock.hydrate_into(dir.path(), None).unwrap();
     assert!(report.commit.is_none());
+    assert!(report.marker.is_none());
     assert!(report.files.is_empty());
     assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
 }
@@ -75,11 +121,93 @@ fn hydrate_into_rejects_invalid_selection() {
 }
 
 #[test]
-fn commit_cas_rebases_after_a_competing_writer() {
+fn stale_projection_cannot_masquerade_as_current() {
+    let mock = bootstrap_mock();
+    let dir = tempfile::tempdir().unwrap();
+    mock.hydrate_into(dir.path(), None).unwrap();
+
+    // A competing writer moves the head: the projection is now stale.
+    mock.inject_competing_commit(
+        [("checkpoints/other.json", b"{}".to_vec())],
+        "checkpoint: other writer",
+        None,
+    );
+    let error = mock.verify_projection(dir.path()).unwrap_err();
+    assert_eq!(error.code(), BrokerErrorCode::LocalIo);
+    assert!(error.message().contains("stale"), "{}", error.message());
+
+    // Re-hydrating restores freshness.
+    mock.hydrate_into(dir.path(), None).unwrap();
+    mock.verify_projection(dir.path()).unwrap();
+}
+
+#[test]
+fn projection_of_another_project_is_refused() {
+    let first = bootstrap_mock();
+    let second = MockStateTransport::with_files(OTHER_UUID, [("a.json", b"{}".to_vec())]);
+    let dir = tempfile::tempdir().unwrap();
+    first.hydrate_into(dir.path(), None).unwrap();
+
+    let error = second.hydrate_into(dir.path(), None).unwrap_err();
+    assert!(error.is_identity_mismatch(), "{error:?}");
+
+    // And the freshness gate refuses it too.
+    let error = second.verify_projection(dir.path()).unwrap_err();
+    assert!(error.is_identity_mismatch(), "{error:?}");
+}
+
+#[test]
+fn interrupted_hydration_leaves_an_incomplete_marker() {
+    let mock = bootstrap_mock();
+    let dir = tempfile::tempdir().unwrap();
+    mock.fail_next_read_blob(StateBrokerError::transport("connection reset", true));
+
+    let error = mock.hydrate_into(dir.path(), None).unwrap_err();
+    assert_eq!(error.code(), BrokerErrorCode::Transport);
+
+    let marker = read_projection_marker(dir.path()).unwrap().expect("marker");
+    assert!(!marker.complete, "an interrupted hydration must not look complete");
+    let error = mock.verify_projection(dir.path()).unwrap_err();
+    assert!(error.message().contains("incomplete"), "{}", error.message());
+}
+
+#[test]
+fn corrupt_marker_fails_closed() {
+    let mock = bootstrap_mock();
+    let dir = tempfile::tempdir().unwrap();
+    mock.hydrate_into(dir.path(), None).unwrap();
+    std::fs::write(dir.path().join(PROJECTION_MARKER_FILE), b"{ not json").unwrap();
+
+    let error = mock.verify_projection(dir.path()).unwrap_err();
+    assert_eq!(error.code(), BrokerErrorCode::LocalIo);
+    assert!(error.message().contains("not valid JSON"), "{}", error.message());
+}
+
+#[test]
+fn rehydration_removes_files_outside_the_new_selection() {
+    let mock = bootstrap_mock();
+    let dir = tempfile::tempdir().unwrap();
+    mock.hydrate_into(dir.path(), None).unwrap();
+    assert!(dir.path().join("checkpoints/first.json").exists());
+
+    // Upsert with a subset: the unselected file is removed so the directory
+    // matches the marker manifest exactly.
+    let selection = vec!["meta/counters.json".to_string()];
+    mock.hydrate_into(dir.path(), Some(&selection)).unwrap();
+    assert!(dir.path().join("meta/counters.json").exists());
+    assert!(!dir.path().join("checkpoints/first.json").exists());
+    let marker = mock.verify_projection(dir.path()).unwrap();
+    assert_eq!(marker.files.len(), 1);
+}
+
+// ── CAS reconciliation ───────────────────────────────────────────────
+
+#[test]
+fn commit_cas_rebases_after_a_non_overlapping_competing_writer() {
     let mock = bootstrap_mock();
     let base_head = mock.head().unwrap();
 
-    // A competing writer lands between our read and our CAS attempt.
+    // A competing writer lands a commit touching a *different* path.
     let competing = mock.inject_competing_commit(
         [("checkpoints/other.json", b"{}".to_vec())],
         "checkpoint: other writer",
@@ -94,16 +222,87 @@ fn commit_cas_rebases_after_a_competing_writer() {
         Some("op-ours".to_string()),
     );
     let resolution = mock.commit_cas(&request, 1).expect("reconciled commit");
-    assert!(!resolution.already_applied);
-    assert_eq!(resolution.attempts, 2, "one conflict, one rebased retry");
-    assert!(resolution.outcome.verified);
-    assert_ne!(resolution.outcome.commit, competing);
+    let outcome = resolution.applied_outcome().expect("applied");
+    assert!(resolution.is_verified());
+    assert_eq!(resolution.attempts(), 2, "one conflict, one rebased retry");
+    assert!(outcome.verified);
+    assert_ne!(outcome.commit, competing);
     assert_eq!(
         mock.file_bytes("checkpoints/ours.json").unwrap(),
         br#"{"ours":true}"#
     );
-    // The competing writer's file survives the retry (whole-file upsert).
+    // The competing writer's file survives the retry.
     assert!(mock.file_bytes("checkpoints/other.json").is_some());
+}
+
+/// The same path changed by a competing writer must not be clobbered by the
+/// automatic rebase: without a proof of non-overlap the call refuses.
+#[test]
+fn commit_cas_refuses_a_same_path_rebase() {
+    let mock = bootstrap_mock();
+    let base_head = mock.head().unwrap();
+    let ours = "checkpoints/first.json";
+
+    // A competing writer puts newer content on the very path we would upsert.
+    mock.inject_competing_commit(
+        [(ours, br#"{"theirs":true}"#.to_vec())],
+        "checkpoint: theirs",
+        None,
+    );
+
+    let request = CommitRequest::single(
+        ours,
+        br#"{"ours":true}"#.to_vec(),
+        Some(base_head),
+        "checkpoint: ours",
+        Some("op-ours".to_string()),
+    );
+    let resolution = mock.commit_cas(&request, 1).expect("verdict");
+    assert!(!resolution.is_verified());
+    match expect_reconcile_required(&resolution) {
+        ReconcileReason::OverlappingPaths { paths } => assert_eq!(paths, &[ours.to_string()]),
+        other => panic!("expected OverlappingPaths, got {other:?}"),
+    }
+    assert_eq!(resolution.attempts(), 1, "no write was attempted after the proof failed");
+    assert_eq!(
+        mock.file_bytes(ours).unwrap(),
+        br#"{"theirs":true}"#,
+        "the competing writer's bytes must survive"
+    );
+    assert!(
+        mock.commit_message(&mock.head().unwrap())
+            .unwrap()
+            .contains("checkpoint: theirs")
+    );
+}
+
+/// Equivalent content is a valid proof: if the observed payload already equals
+/// the intended payload, re-issuing cannot lose data.
+#[test]
+fn commit_cas_allows_a_same_path_rebase_when_content_is_equivalent() {
+    let mock = bootstrap_mock();
+    let base_head = mock.head().unwrap();
+    let ours = "checkpoints/first.json";
+    let intended = br#"{"ok":true}"#.to_vec();
+
+    // The competing writer landed exactly the bytes we intend to write.
+    mock.inject_competing_commit(
+        [(ours, intended.clone())],
+        "checkpoint: same bytes",
+        None,
+    );
+
+    let request = CommitRequest::single(
+        ours,
+        intended.clone(),
+        Some(base_head),
+        "checkpoint: ours",
+        Some("op-ours".to_string()),
+    );
+    let resolution = mock.commit_cas(&request, 1).expect("reconciled commit");
+    assert!(resolution.is_verified());
+    assert_eq!(resolution.attempts(), 2);
+    assert_eq!(mock.file_bytes(ours).unwrap(), intended);
 }
 
 #[test]
@@ -133,18 +332,23 @@ fn commit_cas_detects_our_own_already_landed_write() {
         Some("op-ours".to_string()),
     );
     let resolution = mock.commit_cas(&stale_call, 1).expect("reconcile");
-    assert!(resolution.already_applied);
-    assert_eq!(resolution.attempts, 1);
-    assert_eq!(resolution.outcome.commit, landed.commit);
-    assert!(resolution.outcome.verified, "our paths verify at the head");
+    match &resolution {
+        CasResolution::AlreadyApplied { commit, files, .. } => {
+            assert_eq!(commit, &landed.commit);
+            assert!(files.iter().all(|file| file.verified));
+        }
+        other => panic!("expected AlreadyApplied, got {other:?}"),
+    }
+    assert!(resolution.is_verified());
+    assert_eq!(resolution.attempts(), 1);
     assert_eq!(mock.commit_count(), 1, "no second write was issued");
 }
 
 /// Reconciliation must not vouch for content it did not write: if the head
 /// records our op id but carries a different payload (a reused op id or a later
-/// overwrite), `already_applied` must report `verified: false`.
+/// overwrite), the verdict is an explicit reconcile-required, never success.
 #[test]
-fn commit_cas_does_not_vouch_for_content_it_did_not_write() {
+fn commit_cas_same_op_id_different_content_requires_reconciliation() {
     let mock = bootstrap_mock();
     let base_head = mock.head().unwrap();
 
@@ -171,13 +375,12 @@ fn commit_cas_does_not_vouch_for_content_it_did_not_write() {
         "checkpoint: ours",
         Some("op-ours".to_string()),
     );
-    let resolution = mock.commit_cas(&stale_call, 1).expect("reconcile");
-    assert!(resolution.already_applied);
-    assert!(
-        !resolution.outcome.verified,
-        "a content mismatch must not be reported as a verified write"
-    );
-    assert!(resolution.outcome.files.iter().all(|file| !file.verified));
+    let resolution = mock.commit_cas(&stale_call, 1).expect("verdict");
+    assert!(!resolution.is_verified());
+    match expect_reconcile_required(&resolution) {
+        ReconcileReason::OpIdReusedWithDifferentContent => {}
+        other => panic!("expected OpIdReusedWithDifferentContent, got {other:?}"),
+    }
     assert_eq!(mock.commit_count(), 1, "no second write was issued");
     assert_eq!(
         mock.file_bytes("checkpoints/ours.json").unwrap(),
@@ -187,21 +390,114 @@ fn commit_cas_does_not_vouch_for_content_it_did_not_write() {
 }
 
 #[test]
+fn commit_cas_reconciles_an_ambiguous_write_that_landed() {
+    let mock = bootstrap_mock();
+    let base_head = mock.head().unwrap();
+
+    let landed = mock
+        .commit(&CommitRequest::single(
+            "checkpoints/ours.json",
+            br#"{"ours":true}"#.to_vec(),
+            Some(base_head.clone()),
+            "checkpoint: ours",
+            Some("op-ours".to_string()),
+        ))
+        .expect("direct commit");
+
+    // The next commit call fails ambiguously (e.g. the response was lost).
+    mock.fail_next_commit(ambiguous_error());
+    let request = CommitRequest::single(
+        "checkpoints/ours.json",
+        br#"{"ours":true}"#.to_vec(),
+        Some(base_head),
+        "checkpoint: ours",
+        Some("op-ours".to_string()),
+    );
+    let resolution = mock.commit_cas(&request, 1).expect("verdict");
+    match &resolution {
+        CasResolution::AlreadyApplied { commit, .. } => assert_eq!(commit, &landed.commit),
+        other => panic!("expected AlreadyApplied, got {other:?}"),
+    }
+    assert_eq!(mock.commit_count(), 1, "reconciliation must not write again");
+}
+
+#[test]
+fn commit_cas_reports_an_ambiguous_write_that_did_not_land() {
+    let mock = bootstrap_mock();
+    let head = mock.head().unwrap();
+    mock.fail_next_commit(ambiguous_error());
+
+    let request = CommitRequest::single(
+        "checkpoints/ours.json",
+        br#"{"ours":true}"#.to_vec(),
+        Some(head.clone()),
+        "checkpoint: ours",
+        Some("op-ours".to_string()),
+    );
+    let resolution = mock.commit_cas(&request, 0).expect("verdict");
+    assert!(!resolution.is_verified());
+    match expect_reconcile_required(&resolution) {
+        ReconcileReason::WriteNotLanded => {}
+        other => panic!("expected WriteNotLanded, got {other:?}"),
+    }
+    assert_eq!(resolution.attempts(), 1);
+    assert_eq!(mock.head(), Some(head), "no write was issued");
+}
+
+#[test]
+fn commit_cas_reconcile_read_failure_is_ambiguous() {
+    let mock = bootstrap_mock();
+    let head = mock.head().unwrap();
+    mock.fail_next_commit(ambiguous_error());
+    mock.fail_next_read_state(StateBrokerError::transport("connection reset", true));
+
+    let request = CommitRequest::single(
+        "checkpoints/ours.json",
+        br#"{"ours":true}"#.to_vec(),
+        Some(head),
+        "checkpoint: ours",
+        Some("op-ours".to_string()),
+    );
+    let resolution = mock.commit_cas(&request, 1).expect("verdict");
+    match expect_reconcile_required(&resolution) {
+        ReconcileReason::AmbiguousWrite { detail } => {
+            assert!(detail.contains("could not read"), "{detail}");
+        }
+        other => panic!("expected AmbiguousWrite, got {other:?}"),
+    }
+}
+
+/// A ref that disappeared between the conflict and the re-read must not be
+/// rebased by bootstrapping a fresh history over the deleted one.
+#[test]
+fn commit_cas_refuses_to_bootstrap_over_a_deleted_ref() {
+    let mock = bootstrap_mock();
+    let base_head = mock.head().unwrap();
+    mock.fail_next_commit(stale_error());
+    mock.inject_ref_deletion();
+
+    let request = CommitRequest::single(
+        "checkpoints/ours.json",
+        br#"{"ours":true}"#.to_vec(),
+        Some(base_head),
+        "checkpoint: ours",
+        Some("op-ours".to_string()),
+    );
+    let resolution = mock.commit_cas(&request, 1).expect("verdict");
+    match expect_reconcile_required(&resolution) {
+        ReconcileReason::OverlapUnprovable { detail } => {
+            assert!(detail.contains("disappeared"), "{detail}");
+        }
+        other => panic!("expected OverlapUnprovable, got {other:?}"),
+    }
+    assert!(mock.head().is_none(), "no bootstrap write was issued");
+}
+
+#[test]
 fn commit_cas_exhausts_retries_with_a_typed_stale_error() {
     let mock = bootstrap_mock();
-    let stale = || {
-        StateBrokerError::from_envelope(
-            BrokerErrorCode::StaleState,
-            "expected state head does not match the observed state head".to_string(),
-            true,
-            None,
-            Some(409),
-            None,
-            Some("state.commit".to_string()),
-        )
-    };
-    mock.fail_next_commit(stale());
-    mock.fail_next_commit(stale());
+    mock.fail_next_commit(stale_error());
+    mock.fail_next_commit(stale_error());
 
     let request = CommitRequest::single(
         "checkpoints/ours.json",
@@ -231,34 +527,36 @@ fn commit_cas_requires_an_op_id() {
 }
 
 #[test]
-fn readback_mismatch_is_typed_for_reconciliation() {
+fn reconcile_is_available_to_raw_commit_callers() {
     let mock = bootstrap_mock();
-    let commit = "a".repeat(40);
-    mock.fail_next_commit(StateBrokerError::from_envelope(
-        BrokerErrorCode::UpstreamError,
-        "state commit landed but read-back verification failed".to_string(),
-        false,
-        Some(serde_json::json!({
-            "ref": format!("refs/heads/projects/{UUID}/state"),
-            "commit": commit,
-            "failed_paths": ["checkpoints/ours.json"],
-        })),
-        Some(502),
-        None,
-        Some("state.commit".to_string()),
-    ));
-    let request = CommitRequest::single(
+    let head = mock.head().unwrap();
+    mock.commit(&CommitRequest::single(
         "checkpoints/ours.json",
-        b"{}".to_vec(),
-        mock.head(),
+        br#"{"ours":true}"#.to_vec(),
+        Some(head.clone()),
         "checkpoint: ours",
-        None,
-    );
-    let error = mock.commit(&request).unwrap_err();
-    assert_eq!(error.code(), BrokerErrorCode::UpstreamError);
-    assert!(error.is_readback_mismatch(), "commit sha is recoverable");
-    assert!(!error.retryable(), "never blind-retry a read-back mismatch");
+        Some("op-ours".to_string()),
+    ))
+    .expect("direct commit");
+
+    let landed = mock
+        .reconcile(&CommitRequest::single(
+            "checkpoints/ours.json",
+            br#"{"ours":true}"#.to_vec(),
+            Some(head),
+            "checkpoint: ours",
+            Some("op-ours".to_string()),
+        ))
+        .expect("reconcile");
+    match landed {
+        OpReconciliation::Landed { files, .. } => {
+            assert!(files.iter().all(|file| file.verified));
+        }
+        other => panic!("expected Landed, got {other:?}"),
+    }
 }
+
+// ── Integration with the existing hydration path ─────────────────────
 
 /// The projection a broker transport writes must be consumable by the existing
 /// state-hydration path unchanged: this is the "local SQLite/files are a
@@ -318,6 +616,8 @@ fn broker_projection_feeds_existing_state_hydration() {
     let dir = tempfile::tempdir().unwrap();
     let projection = dir.path().join("state-projection");
     mock.hydrate_into(&projection, None).expect("hydrate");
+    // The projection is only trustworthy after the freshness gate passes.
+    mock.verify_projection(&projection).expect("fresh projection");
 
     let read_back = crate::checkpoint::read_checkpoint(&projection).expect("read checkpoint");
     let db = crate::db::Database::open(Path::new(":memory:")).unwrap();

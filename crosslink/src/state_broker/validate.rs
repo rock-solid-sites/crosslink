@@ -118,14 +118,23 @@ pub fn validate_message(message: &str) -> Result<(), StateBrokerError> {
     }
     let trimmed = message.trim();
     for trailer in ["Project-UUID:", "Broker:", "Broker-Op:"] {
-        if trimmed.len() >= trailer.len() && trimmed[..trailer.len()].eq_ignore_ascii_case(trailer)
-        {
+        if starts_with_ignoring_ascii_case(trimmed, trailer) {
             return Err(invalid(
                 "commit message must not begin with a broker trailer key",
             ));
         }
     }
     Ok(())
+}
+
+/// Whether `text` starts with `prefix`, comparing ASCII case-insensitively.
+///
+/// This is a **byte** prefix comparison, never a byte slice of a `&str`: a
+/// message whose prefix bytes fall inside a multi-byte UTF-8 character (for
+/// example `"éééé"` against `"Broker:"`) must compare unequal, not panic.
+fn starts_with_ignoring_ascii_case(text: &str, prefix: &str) -> bool {
+    let bytes = text.as_bytes();
+    bytes.len() >= prefix.len() && bytes[..prefix.len()].eq_ignore_ascii_case(prefix.as_bytes())
 }
 
 /// Validate an optional op id against the broker rule
@@ -197,8 +206,18 @@ pub fn validate_project_uuid(value: &str) -> Result<(), StateBrokerError> {
 /// root, refusing anything that could escape the root.
 ///
 /// The broker path rules already exclude `..`, absolute paths, backslashes,
-/// and NUL; this function re-checks them and additionally rejects
-/// Windows-reserved file names so a projection is portable.
+/// and NUL; this function re-checks them.
+///
+/// # Windows compatibility
+///
+/// The broker's path grammar is a superset of what Windows file names can
+/// represent (`aux`, `nul`, `con.txt`, trailing dots). Rejecting those names
+/// outright would make broker-valid state un-hydratable on every platform, so
+/// the escape is applied **only on Windows** ([`escape_windows_segment`]): a
+/// reserved segment gains a leading `~` and a segment with a trailing dot
+/// gains a trailing `~`. `~` is outside the broker grammar, so an escaped
+/// segment can never collide with a real broker path segment, and
+/// [`unescape_windows_segment`] inverts the mapping exactly.
 ///
 /// # Errors
 ///
@@ -207,14 +226,46 @@ pub fn projection_relative_path(path: &str) -> Result<std::path::PathBuf, StateB
     validate_logical_path(path)?;
     let mut out = std::path::PathBuf::new();
     for segment in path.split('/') {
-        if crate::utils::is_windows_reserved_name(segment) {
-            return Err(invalid(format!(
-                "logical path segment {segment:?} is a reserved file name"
-            )));
+        match escape_windows_segment(segment, cfg!(windows)) {
+            Some(escaped) => out.push(escaped),
+            None => out.push(segment),
         }
-        out.push(segment);
     }
     Ok(out)
+}
+
+/// Windows-only escape for a broker path segment, or `None` when the segment
+/// is directly representable.
+///
+/// `windows` is an explicit parameter (rather than a `cfg!` inside) so both
+/// branches are testable on every platform.
+#[must_use]
+pub fn escape_windows_segment(segment: &str, windows: bool) -> Option<String> {
+    if !windows {
+        return None;
+    }
+    let reserved = crate::utils::is_windows_reserved_name(segment);
+    let trailing_dot = segment.ends_with('.');
+    if !reserved && !trailing_dot {
+        return None;
+    }
+    let mut escaped = String::with_capacity(segment.len() + 2);
+    if reserved {
+        escaped.push('~');
+    }
+    escaped.push_str(segment);
+    if trailing_dot {
+        escaped.push('~');
+    }
+    Some(escaped)
+}
+
+/// Invert [`escape_windows_segment`]. Broker segments cannot contain `~`, so
+/// the transformation is unambiguous.
+#[must_use]
+pub fn unescape_windows_segment(escaped: &str) -> String {
+    let stripped_prefix = escaped.strip_prefix('~').unwrap_or(escaped);
+    stripped_prefix.strip_suffix('~').unwrap_or(stripped_prefix).to_string()
 }
 
 #[cfg(test)]
@@ -267,7 +318,57 @@ mod tests {
         let path = projection_relative_path("issues/x.json").unwrap();
         assert_eq!(path, std::path::Path::new("issues").join("x.json"));
         assert!(projection_relative_path("../escape").is_err());
-        assert!(projection_relative_path("aux/name.json").is_err());
+        assert!(projection_relative_path("a/./b").is_err());
+    }
+
+    /// Broker-valid segments that are Windows-reserved names must not make a
+    /// projection unhydratable on platforms that can represent them.
+    #[test]
+    fn projection_paths_accept_broker_valid_reserved_names_off_windows() {
+        let path = projection_relative_path("aux/name.json").unwrap();
+        if cfg!(windows) {
+            assert_eq!(path, std::path::Path::new("~aux").join("name.json"));
+        } else {
+            assert_eq!(path, std::path::Path::new("aux").join("name.json"));
+        }
+        // `nul.json` is a legal broker path segment.
+        projection_relative_path("nul.json").unwrap();
+    }
+
+    #[test]
+    fn windows_escape_is_reversible_and_collision_free() {
+        // Off Windows nothing is escaped.
+        assert_eq!(escape_windows_segment("aux", false), None);
+        assert_eq!(escape_windows_segment("a.", false), None);
+
+        // Reserved names gain a leading `~`; trailing dots gain a trailing `~`.
+        assert_eq!(escape_windows_segment("aux", true).as_deref(), Some("~aux"));
+        assert_eq!(escape_windows_segment("CON", true).as_deref(), Some("~CON"));
+        assert_eq!(escape_windows_segment("a.", true).as_deref(), Some("a.~"));
+        assert_eq!(
+            escape_windows_segment("nul.txt", true).as_deref(),
+            Some("~nul.txt")
+        );
+        assert_eq!(
+            escape_windows_segment("aux.", true).as_deref(),
+            Some("~aux.~")
+        );
+        assert_eq!(escape_windows_segment("agent-1", true), None);
+
+        for segment in ["aux", "CON", "a.", "nul.txt", "aux.", "agent-1"] {
+            let escaped = escape_windows_segment(segment, true)
+                .unwrap_or_else(|| segment.to_string());
+            assert_eq!(
+                unescape_windows_segment(&escaped),
+                segment,
+                "escape must be reversible for {segment:?}"
+            );
+        }
+
+        // `~` is outside the broker path grammar, so escaped output cannot
+        // collide with a real broker segment (which can never contain `~`).
+        assert!(validate_logical_path("~aux").is_err());
+        assert!(validate_logical_path("a.~").is_err());
     }
 
     #[test]
@@ -284,6 +385,26 @@ mod tests {
         assert!(validate_message("broker-op: spoof").is_err());
         assert!(validate_message(&"x".repeat(MAX_MESSAGE_LENGTH + 1)).is_err());
         validate_message(&"x".repeat(MAX_MESSAGE_LENGTH)).unwrap();
+    }
+
+    /// A multi-byte message prefix must compare unequal, not panic: the old
+    /// implementation sliced `&str` by byte offset after only a char count.
+    #[test]
+    fn message_rules_never_panic_on_non_ascii_prefixes() {
+        for message in [
+            "éééé",
+            "€€€ broker note",
+            "日本語のメモ",
+            "éééé broker note",
+            "𝄞𝄞𝄞 note",
+        ] {
+            validate_message(message)
+                .unwrap_or_else(|e| panic!("{message:?} must be accepted: {e}"));
+        }
+        // Non-ASCII cannot spoof a trailer key, but the ASCII spellings still
+        // must be rejected.
+        assert!(validate_message("éééé").is_ok());
+        assert!(validate_message("BROKER: spoof").is_err());
     }
 
     #[test]

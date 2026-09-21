@@ -7,12 +7,20 @@
 //! Crosslink-side transport for those operations:
 //!
 //! - [`client::StateBrokerClient`] — typed blocking HTTP client;
-//! - [`transport::ProjectStateTransport`] — the narrow persistence seam
-//!   (read state, read blob, verify, CAS commit, disposable hydration);
+//! - [`transport::ProjectStateTransport`] — the broker-v1-shaped CAS
+//!   transport seam (read state, read blob, verify, CAS commit, explicit
+//!   op-id reconciliation, disposable hydration), plus identity checks and
+//!   refusal of unsafe automatic rebases;
+//! - [`projection`] — identity/freshness markers for disposable projections;
 //! - [`mock::MockStateTransport`] — deterministic in-memory broker with the
-//!   same CAS/typed-error semantics, for tests and dry runs;
+//!   same CAS/history semantics, for tests and dry runs;
 //! - [`config::StateBackend`] — backend selection (existing local behavior is
 //!   the default; the broker is opt-in).
+//!
+//! The trait deliberately mirrors the broker v1 contract; the mapping from
+//! Crosslink's v3 per-agent refs onto the broker's single state tree is an
+//! open decision recorded in `.design/state-broker-transport.md` §4 and is not
+//! pre-answered here.
 //!
 //! # What this module does NOT do
 //!
@@ -43,6 +51,7 @@ pub mod config;
 pub mod digest;
 pub mod error;
 pub mod mock;
+pub mod projection;
 pub mod transport;
 pub mod validate;
 
@@ -69,6 +78,12 @@ pub use error::{redact_secret, BrokerErrorCode, BrokerResult, StateBrokerError};
 #[allow(unused_imports)]
 pub use mock::MockStateTransport;
 #[allow(unused_imports)]
+pub use projection::{
+    read_projection_marker, ProjectionFile, ProjectionMarker, PROJECTION_MARKER_FILE,
+    PROJECTION_MARKER_SCHEMA,
+};
+#[allow(unused_imports)]
 pub use transport::{
-    message_records_op, transport_from_env, CasResolution, ProjectStateTransport, ProjectionReport,
+    message_records_op, CasResolution, OpReconciliation, ProjectStateTransport, ProjectionReport,
+    ReconcileReason,
 };

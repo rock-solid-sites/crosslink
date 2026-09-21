@@ -221,17 +221,6 @@ impl StateBlob {
         }
         Ok(decoded)
     }
-
-    /// Decode the blob as UTF-8 text.
-    ///
-    /// # Errors
-    ///
-    /// See [`Self::bytes`]; also fails when the content is not UTF-8.
-    pub fn text(&self) -> Result<String, StateBrokerError> {
-        let bytes = self.bytes()?;
-        String::from_utf8(bytes)
-            .map_err(|e| StateBrokerError::protocol(format!("blob is not valid UTF-8: {e}")))
-    }
 }
 
 /// `GET .../state/verify` result.
@@ -510,20 +499,57 @@ impl StateBrokerClient {
 
     /// Caller identity: token id, project UUID, scopes.
     ///
+    /// The broker-reported project UUID is checked against the configured UUID;
+    /// a mismatch is [`BrokerErrorCode::IdentityMismatch`] (never a silently
+    /// accepted answer from another project).
+    ///
     /// # Errors
     ///
-    /// Transport, protocol, or typed broker failures.
+    /// Transport, protocol, identity-mismatch, or typed broker failures.
+    ///
+    /// [`BrokerErrorCode::IdentityMismatch`]: super::error::BrokerErrorCode::IdentityMismatch
     pub fn whoami(&self) -> Result<WhoAmI, StateBrokerError> {
-        self.get(&format!("{}/v1/whoami", self.config.base_url()), &[])
+        let who = self.get::<WhoAmI>(&format!("{}/v1/whoami", self.config.base_url()), &[])?;
+        if who.project_uuid != self.config.project_uuid() {
+            return Err(StateBrokerError::identity_mismatch(format!(
+                "broker reports project {} but this client is configured for {}",
+                who.project_uuid,
+                self.config.project_uuid()
+            )));
+        }
+        Ok(who)
     }
 
     /// Read the current durable state: ref, head, inventory, baseline.
     ///
+    /// The reported project UUID and state ref are checked against the
+    /// configured identity before the state is returned: a broker (or a
+    /// misrouted request) that answers for another project is a hard
+    /// [`BrokerErrorCode::IdentityMismatch`] error, not data.
+    ///
     /// # Errors
     ///
-    /// Transport, protocol, or typed broker failures.
+    /// Transport, protocol, identity-mismatch, or typed broker failures.
+    ///
+    /// [`BrokerErrorCode::IdentityMismatch`]: super::error::BrokerErrorCode::IdentityMismatch
     pub fn state(&self) -> Result<ProjectState, StateBrokerError> {
-        self.get(&self.state_url(), &[])
+        let state: ProjectState =
+            self.get(&self.state_url(), &[])?;
+        if state.project.uuid != self.config.project_uuid() {
+            return Err(StateBrokerError::identity_mismatch(format!(
+                "broker state belongs to project {} but this client is configured for {}",
+                state.project.uuid,
+                self.config.project_uuid()
+            )));
+        }
+        if state.state.state_ref != self.config.state_ref() {
+            return Err(StateBrokerError::identity_mismatch(format!(
+                "broker state ref {} does not match the configured {}",
+                state.state.state_ref,
+                self.config.state_ref()
+            )));
+        }
+        Ok(state)
     }
 
     /// Hydrate one state file at `at` (default: the state head).
@@ -591,12 +617,27 @@ impl StateBrokerClient {
     /// Never blind-retry this call — use
     /// [`crate::state_broker::ProjectStateTransport::commit_cas`].
     ///
+    /// # Write ambiguity
+    ///
+    /// A write that fails *after* the request was sent can have landed anyway.
+    /// Every such failure (transport timeout/reset, unparseable response,
+    /// upstream 502, internal 500, or a success envelope with
+    /// `verified: false`) is surfaced as
+    /// [`BrokerErrorCode::ReconcileRequired`] with
+    /// `details.reason`, the intended `op_id`, and any known commit/paths —
+    /// never as an ordinary error or success. Reconcile by op id before
+    /// deciding whether to write again.
+    ///
     /// # Errors
     ///
-    /// [`BrokerErrorCode::InvalidInput`] for locally-rejected input, plus
-    /// transport, protocol, and typed broker failures. A read-back mismatch
-    /// surfaces as [`BrokerErrorCode::UpstreamError`] with the commit sha in
-    /// `details` — the write may have landed; reconcile before retrying.
+    /// [`BrokerErrorCode::InvalidInput`] for locally-rejected input,
+    /// [`BrokerErrorCode::ReconcileRequired`] for an ambiguous write, plus
+    /// definite rejections (unauthorized / scope_violation / not_found /
+    /// method_not_allowed / stale_state) and transport failures before the
+    /// request could be sent.
+    ///
+    /// [`BrokerErrorCode::InvalidInput`]: super::error::BrokerErrorCode::InvalidInput
+    /// [`BrokerErrorCode::ReconcileRequired`]: super::error::BrokerErrorCode::ReconcileRequired
     pub fn commit(&self, request: &CommitRequest) -> Result<CommitOutcome, StateBrokerError> {
         request.validate()?;
         let body = CommitBody {
@@ -615,19 +656,130 @@ impl StateBrokerClient {
         let body = serde_json::to_value(&body).map_err(|e| {
             StateBrokerError::invalid_input(format!("commit body serialization failed: {e}"))
         })?;
-        let outcome: CommitOutcome = self.send(
+        let outcome: CommitOutcome = match self.send(
             reqwest::Method::POST,
             &format!("{}/commit", self.state_url()),
             &[],
             Some(&body),
-        )?;
+        ) {
+            Ok(outcome) => outcome,
+            Err(error) => return Err(self.classify_commit_failure(request, error)),
+        };
         if !outcome.verified {
-            return Err(StateBrokerError::protocol(format!(
-                "broker reported verified=false for committed path(s) at {}; treat as unverified",
-                outcome.commit
-            )));
+            return Err(self.reconcile_required_for_outcome(
+                request,
+                &outcome,
+                "verified_false",
+                "broker reported verified=false; the write may have landed partially — \
+                 reconcile by op id before retrying",
+            ));
         }
         Ok(outcome)
+    }
+
+    /// Classify a failed `POST /commit`: definite rejections pass through;
+    /// anything that may have been applied becomes `reconcile_required`.
+    fn classify_commit_failure(
+        &self,
+        request: &CommitRequest,
+        error: StateBrokerError,
+    ) -> StateBrokerError {
+        use super::error::BrokerErrorCode;
+        match error.code() {
+            // The broker rejected the request before writing.
+            BrokerErrorCode::Unauthorized
+            | BrokerErrorCode::ScopeViolation
+            | BrokerErrorCode::InvalidInput
+            | BrokerErrorCode::NotFound
+            | BrokerErrorCode::MethodNotAllowed
+            | BrokerErrorCode::StaleState => error,
+            // Ambiguous: the write may have landed (or the broker landed it and
+            // failed while reading back).
+            BrokerErrorCode::Transport | BrokerErrorCode::Protocol | BrokerErrorCode::InternalError => {
+                let reason = if error.code() == BrokerErrorCode::Transport {
+                    "transport_ambiguous"
+                } else {
+                    "response_ambiguous"
+                };
+                self.reconcile_required_for_error(request, &error, reason)
+            }
+            BrokerErrorCode::UpstreamError => {
+                self.reconcile_required_for_error(request, &error, "readback_mismatch")
+            }
+            // Already classified.
+            BrokerErrorCode::Configuration
+            | BrokerErrorCode::LocalIo
+            | BrokerErrorCode::ReconcileRequired
+            | BrokerErrorCode::IdentityMismatch => error,
+        }
+    }
+
+    /// Build a `reconcile_required` error from a lower-level failure.
+    fn reconcile_required_for_error(
+        &self,
+        request: &CommitRequest,
+        error: &StateBrokerError,
+        reason: &str,
+    ) -> StateBrokerError {
+        let mut details = serde_json::Map::new();
+        details.insert("reason".to_string(), Value::String(reason.to_string()));
+        details.insert(
+            "cause".to_string(),
+            Value::String(self.config.redact(error.message())),
+        );
+        if let Some(op_id) = &request.op_id {
+            details.insert("op_id".to_string(), Value::String(op_id.clone()));
+        }
+        details.insert(
+            "paths".to_string(),
+            Value::Array(
+                request
+                    .paths()
+                    .into_iter()
+                    .map(Value::String)
+                    .collect(),
+            ),
+        );
+        if let Some(previous) = error.details() {
+            for key in ["commit", "failed_paths", "observed_head"] {
+                if let Some(value) = previous.get(key) {
+                    details.insert(key.to_string(), value.clone());
+                }
+            }
+        }
+        StateBrokerError::reconcile_required(
+            format!(
+                "write outcome is unknown ({reason}); reconcile by op_id before retrying: {error}"
+            ),
+            Some(Value::Object(details)),
+        )
+    }
+
+    /// Build a `reconcile_required` error from a received but unverified
+    /// success outcome.
+    fn reconcile_required_for_outcome(
+        &self,
+        request: &CommitRequest,
+        outcome: &CommitOutcome,
+        reason: &str,
+        message: &str,
+    ) -> StateBrokerError {
+        let failed_paths: Vec<Value> = outcome
+            .files
+            .iter()
+            .filter(|file| !file.verified)
+            .map(|file| Value::String(file.path.clone()))
+            .collect();
+        let mut details = serde_json::Map::new();
+        details.insert("reason".to_string(), Value::String(reason.to_string()));
+        details.insert("commit".to_string(), Value::String(outcome.commit.clone()));
+        if let Some(op_id) = &request.op_id {
+            details.insert("op_id".to_string(), Value::String(op_id.clone()));
+        }
+        if !failed_paths.is_empty() {
+            details.insert("failed_paths".to_string(), Value::Array(failed_paths));
+        }
+        StateBrokerError::reconcile_required(message.to_string(), Some(Value::Object(details)))
     }
 
     fn state_url(&self) -> String {

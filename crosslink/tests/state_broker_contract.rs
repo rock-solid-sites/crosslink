@@ -46,6 +46,11 @@ struct StubState {
     echo_token_next: bool,
     /// Return a non-retryable read-back mismatch for the next request.
     readback_mismatch_next: bool,
+    /// Report this UUID (instead of the configured project) in whoami/state.
+    project_uuid_override: Option<String>,
+    /// Return `verified: false` on the next commit response even though the
+    /// commit lands (broker read-back-disagreement shape).
+    unverified_next: bool,
 }
 
 struct StubBroker {
@@ -72,6 +77,8 @@ impl StubBroker {
             unknown_error_code: false,
             echo_token_next: false,
             readback_mismatch_next: false,
+            project_uuid_override: None,
+            unverified_next: false,
         }));
         let stop = Arc::new(AtomicBool::new(false));
         let thread_state = Arc::clone(&state);
@@ -147,6 +154,18 @@ impl StubBroker {
     /// Make the next response a non-retryable read-back mismatch (502).
     fn set_readback_mismatch_next(&self) {
         self.lock().readback_mismatch_next = true;
+    }
+
+    /// Report a different project UUID for the next whoami/state responses
+    /// (backend/project identity binding test).
+    fn set_project_uuid_override(&self, uuid: Option<&str>) {
+        self.lock().project_uuid_override = uuid.map(str::to_string);
+    }
+
+    /// Land the next commit but report `verified: false` (the broker's
+    /// read-back-disagreement shape).
+    fn set_unverified_next(&self) {
+        self.lock().unverified_next = true;
     }
 
     fn head(&self) -> Option<String> {
@@ -350,12 +369,17 @@ fn route(request: &StubRequest, state: &Arc<Mutex<StubState>>) -> (u16, serde_js
         );
     }
 
+    let reported_uuid = guard
+        .project_uuid_override
+        .clone()
+        .unwrap_or_else(|| guard.project_uuid.clone());
+
     if request.path == "/v1/whoami" {
         return ok(
             "whoami",
             serde_json::json!({
                 "token_id": "token-1",
-                "project_uuid": guard.project_uuid,
+                "project_uuid": reported_uuid,
                 "scopes": ["state:read", "state:write"],
             }),
         );
@@ -385,7 +409,7 @@ fn route(request: &StubRequest, state: &Arc<Mutex<StubState>>) -> (u16, serde_js
             if request.method != "GET" {
                 return (405, error_envelope("method_not_allowed", "GET only", false));
             }
-            ok("state.read", state_result(&guard))
+            ok("state.read", state_result(&guard, &reported_uuid))
         }
         "/blob" => {
             let Some(path) = request.query.get("path") else {
@@ -396,16 +420,16 @@ fn route(request: &StubRequest, state: &Arc<Mutex<StubState>>) -> (u16, serde_js
             }
             let head = guard.head.clone().unwrap_or_default();
             let requested = request.query.get("ref").cloned();
-            let snapshot = match requested.as_deref() {
-                None => guard.history.get(&head),
+            let (commit_at, snapshot) = match requested.as_deref() {
+                None => (head.clone(), guard.history.get(&head)),
                 Some(reference)
                     if reference == state_ref(&guard.project_uuid)
                         || reference == state_branch(&guard.project_uuid)
                         || reference == "state" =>
                 {
-                    guard.history.get(&head)
+                    (head.clone(), guard.history.get(&head))
                 }
-                Some(commit) => guard.history.get(commit),
+                Some(commit) => (commit.to_string(), guard.history.get(commit)),
             };
             let Some(snapshot) = snapshot else {
                 return (404, error_envelope("not_found", "no such ref", false));
@@ -421,7 +445,9 @@ fn route(request: &StubRequest, state: &Arc<Mutex<StubState>>) -> (u16, serde_js
                 serde_json::json!({
                     "path": path,
                     "ref": requested.unwrap_or_else(|| state_ref(&guard.project_uuid)),
-                    "commit": head,
+                    // The broker reports the commit the blob was read at, not
+                    // necessarily the head (historical reads must be faithful).
+                    "commit": commit_at,
                     "blob_sha": pseudo_sha(bytes),
                     "sha256": sha256_hex(bytes),
                     "size": bytes.len(),
@@ -559,6 +585,12 @@ fn route(request: &StubRequest, state: &Arc<Mutex<StubState>>) -> (u16, serde_js
             }
 
             let previous_head = guard.head.clone();
+            let verified_flag = if guard.unverified_next {
+                guard.unverified_next = false;
+                false
+            } else {
+                true
+            };
             let mut verified = Vec::new();
             for file in &files {
                 let path = file
@@ -577,7 +609,7 @@ fn route(request: &StubRequest, state: &Arc<Mutex<StubState>>) -> (u16, serde_js
                     "blob_sha": pseudo_sha(&content),
                     "sha256": sha256_hex(&content),
                     "size": content.len(),
-                    "verified": true,
+                    "verified": verified_flag,
                 }));
             }
             guard.counter += 1;
@@ -604,7 +636,7 @@ fn route(request: &StubRequest, state: &Arc<Mutex<StubState>>) -> (u16, serde_js
                     "message": full_message,
                     "op_id": op_id,
                     "files": verified,
-                    "verified": true,
+                    "verified": verified_flag,
                 }),
             )
         }
@@ -634,7 +666,7 @@ fn error_envelope(code: &str, message: &str, retryable: bool) -> serde_json::Val
     })
 }
 
-fn state_result(state: &StubState) -> serde_json::Value {
+fn state_result(state: &StubState, reported_uuid: &str) -> serde_json::Value {
     let entries: Vec<serde_json::Value> = state
         .files
         .iter()
@@ -655,13 +687,13 @@ fn state_result(state: &StubState) -> serde_json::Value {
     });
     serde_json::json!({
         "project": {
-            "uuid": state.project_uuid,
+            "uuid": reported_uuid,
             "slug": "codex-build",
             "source_repository": "https://example.invalid/codex-build",
         },
         "backend_repository": "rock-solid-sites/crosslink-state",
         "state": {
-            "ref": state_ref(&state.project_uuid),
+            "ref": state_ref(reported_uuid),
             "exists": state.head.is_some(),
             "head": head,
             "entries": entries,
@@ -769,10 +801,14 @@ fn stub_message_ok(message: &str) -> bool {
         return false;
     }
     let trimmed = message.trim();
+    // Byte-prefix comparison, never a `&str` byte slice: a multi-byte prefix
+    // must compare unequal, not panic (matches the broker's TS regex).
     !["Project-UUID:", "Broker:", "Broker-Op:"]
         .iter()
         .any(|trailer| {
-            trimmed.len() >= trailer.len() && trimmed[..trailer.len()].eq_ignore_ascii_case(trailer)
+            trimmed.as_bytes().len() >= trailer.len()
+                && trimmed.as_bytes()[..trailer.len()]
+                    .eq_ignore_ascii_case(trailer.as_bytes())
         })
 }
 
@@ -929,7 +965,10 @@ fn blob_read_verifies_digests_and_hydrates_a_disposable_projection() {
         .expect("blob read");
     assert_eq!(blob.bytes().unwrap(), br#"{"title":"one"}"#);
     assert_eq!(blob.sha256, sha256_hex(br#"{"title":"one"}"#));
-    assert_eq!(blob.text().unwrap(), r#"{"title":"one"}"#);
+    assert_eq!(
+        String::from_utf8(blob.bytes().unwrap()).unwrap(),
+        r#"{"title":"one"}"#
+    );
 
     let entries = client
         .verify(
@@ -949,9 +988,52 @@ fn blob_read_verifies_digests_and_hydrates_a_disposable_projection() {
         std::fs::read(projection.join("issues/abc.json")).unwrap(),
         br#"{"title":"one"}"#
     );
-    // The projection is disposable; the durable head is still the broker's.
+    // The projection is identity-bound and fresh at the durable head.
+    let marker = client
+        .verify_projection(&projection)
+        .expect("fresh projection");
+    assert_eq!(marker.project_uuid, UUID);
+    assert_eq!(marker.head_commit, broker.head().unwrap());
+
+    // It is disposable: deleting it loses nothing; the durable head is still
+    // the broker's.
     std::fs::remove_dir_all(&projection).unwrap();
     assert_eq!(client.current_head().unwrap(), broker.head());
+}
+
+/// A projection that no longer matches the durable head must be refused by the
+/// freshness gate (stale projections cannot masquerade as current).
+#[test]
+fn stale_projection_is_refused_over_http() {
+    let broker = StubBroker::start();
+    broker.seed(vec![("a.json", b"one".to_vec())]);
+    let client = broker.client();
+    let dir = tempfile::tempdir().unwrap();
+    let projection = dir.path().join("state-projection");
+    client.hydrate_into(&projection, None).expect("hydrate");
+    client.verify_projection(&projection).expect("fresh");
+
+    // The durable head moves: the projection is stale.
+    client
+        .commit(&CommitRequest::single(
+            "b.json",
+            b"two".to_vec(),
+            broker.head(),
+            "advance",
+            None,
+        ))
+        .expect("commit");
+    let error = client.verify_projection(&projection).unwrap_err();
+    assert_eq!(
+        error.code(),
+        crosslink::state_broker::BrokerErrorCode::LocalIo
+    );
+    assert!(error.message().contains("stale"), "{}", error.message());
+
+    // Re-hydrating restores freshness.
+    client.hydrate_into(&projection, None).expect("rehydrate");
+    let marker = client.verify_projection(&projection).expect("fresh again");
+    assert_eq!(marker.head_commit, broker.head().unwrap());
 }
 
 #[test]
@@ -985,6 +1067,10 @@ fn verify_and_blob_read_support_historical_commits() {
     let blob = client
         .read_blob("a.json", Some(&first))
         .expect("blob at historical commit");
+    assert_eq!(
+        blob.commit, first,
+        "the blob must report the commit it was read at"
+    );
     assert_eq!(blob.bytes().unwrap(), b"one");
     let at_head = client.read_blob("b.json", None).expect("blob at head");
     assert_eq!(at_head.bytes().unwrap(), b"two");
@@ -1059,9 +1145,12 @@ fn commit_bootstrap_conflict_and_reconciled_retry() {
         Some("op-second".to_string()),
     );
     let resolution = client.commit_cas(&request, 1).expect("cas retry");
-    assert!(!resolution.already_applied);
-    assert!(resolution.outcome.verified);
-    assert_ne!(resolution.outcome.commit, first_head);
+    assert!(matches!(
+        resolution,
+        crosslink::state_broker::CasResolution::Applied { .. }
+    ));
+    assert!(resolution.is_verified());
+    assert_ne!(resolution.commit(), Some(first_head.as_str()));
 
     // Idempotent replay: pretend the landed write's response was lost and the
     // caller retries with the pre-write head. The broker reports stale_state;
@@ -1079,8 +1168,11 @@ fn commit_bootstrap_conflict_and_reconciled_retry() {
             1,
         )
         .expect("idempotent replay");
-    assert!(replay.already_applied);
-    assert!(replay.outcome.verified);
+    assert!(matches!(
+        replay,
+        crosslink::state_broker::CasResolution::AlreadyApplied { .. }
+    ));
+    assert!(replay.is_verified());
     assert_eq!(
         broker.head(),
         before_replay,
@@ -1144,24 +1236,49 @@ fn token_never_leaks_into_errors_logs_or_urls() {
 }
 
 #[test]
-fn readback_mismatch_is_non_retryable_through_the_client() {
+fn readback_mismatch_on_a_write_is_reconcile_required() {
     let broker = StubBroker::start();
     broker.seed(vec![("a.json", b"{}".to_vec())]);
     let client = broker.client();
 
+    // On a *read*, an upstream error is still an upstream error (non-retryable
+    // when the broker says so).
     broker.set_readback_mismatch_next();
     let error = client.read_state().unwrap_err();
     assert_eq!(
         error.code(),
         crosslink::state_broker::BrokerErrorCode::UpstreamError
     );
-    assert!(error.is_readback_mismatch());
     assert!(
         !error.retryable(),
-        "an explicit retryable=false (read-back mismatch) must not be overridden by the code default"
+        "an explicit retryable=false must not be overridden by the code default"
     );
 
-    // Control: stale_state stays retryable.
+    // On a *write*, the same shape means the commit may have landed: it must be
+    // an explicit reconcile-required outcome, never an ordinary error.
+    broker.set_readback_mismatch_next();
+    let error = client
+        .commit(&CommitRequest::single(
+            "b.json",
+            b"{}".to_vec(),
+            broker.head(),
+            "ambiguous write",
+            Some("op-ambiguous".to_string()),
+        ))
+        .unwrap_err();
+    assert!(error.is_reconcile_required(), "{error:?}");
+    assert_eq!(error.reconcile_reason(), Some("readback_mismatch"));
+    assert!(!error.retryable(), "never blind-retry a write");
+    assert_eq!(
+        error
+            .details()
+            .and_then(|details| details.get("op_id"))
+            .and_then(|value| value.as_str()),
+        Some("op-ambiguous")
+    );
+
+    // Control: stale_state stays retryable, and a definite rejection is not
+    // reclassified as ambiguity.
     let stale = client
         .commit(&CommitRequest::single(
             "a.json",
@@ -1173,6 +1290,160 @@ fn readback_mismatch_is_non_retryable_through_the_client() {
         .unwrap_err();
     assert!(stale.is_stale_state());
     assert!(stale.retryable());
+}
+
+/// A success envelope carrying `verified: false` is not an ordinary success:
+/// the write may have landed, so it must be reconcile-required, and
+/// `commit_cas` may resolve it to `AlreadyApplied` only by independently
+/// verifying content.
+#[test]
+fn verified_false_is_never_an_ordinary_success() {
+    let broker = StubBroker::start();
+    broker.seed(vec![("a.json", b"{}".to_vec())]);
+    let client = broker.client();
+    let base = broker.head().unwrap();
+
+    broker.set_unverified_next();
+    let error = client
+        .commit(&CommitRequest::single(
+            "b.json",
+            b"two".to_vec(),
+            Some(base.clone()),
+            "write with unverified read-back",
+            Some("op-unverified".to_string()),
+        ))
+        .unwrap_err();
+    assert!(error.is_reconcile_required(), "{error:?}");
+    assert_eq!(error.reconcile_reason(), Some("verified_false"));
+    assert!(!error.retryable());
+    // The stub still applied the commit (the broker's read-back disagreed, not
+    // the ref update).
+    let landed = broker.head().unwrap();
+    assert_ne!(landed, base);
+
+    // commit_cas reconciles by op id and content: the payload is there, so the
+    // verdict is a verified AlreadyApplied, and no second write happens.
+    let resolution = client
+        .commit_cas(
+            &CommitRequest::single(
+                "b.json",
+                b"two".to_vec(),
+                Some(base),
+                "write with unverified read-back",
+                Some("op-unverified".to_string()),
+            ),
+            1,
+        )
+        .expect("reconciled verdict");
+    assert!(
+        matches!(
+            resolution,
+            crosslink::state_broker::CasResolution::AlreadyApplied { .. }
+        ),
+        "{resolution:?}"
+    );
+    assert!(resolution.is_verified());
+    assert_eq!(broker.head(), Some(landed));
+}
+
+/// The same path changed by a competing writer must be refused over real HTTP,
+/// not clobbered by the CAS rebase.
+#[test]
+fn same_path_rebase_is_refused_through_the_client() {
+    let broker = StubBroker::start();
+    broker.seed(vec![("shared/counter.json", b"{\"n\":1}".to_vec())]);
+    let client = broker.client();
+    let base = broker.head().unwrap();
+
+    // A competing writer advances the same path.
+    client
+        .commit(&CommitRequest::single(
+            "shared/counter.json",
+            b"{\"n\":2}".to_vec(),
+            Some(base.clone()),
+            "competing update",
+            Some("op-theirs".to_string()),
+        ))
+        .expect("competing commit");
+
+    let resolution = client
+        .commit_cas(
+            &CommitRequest::single(
+                "shared/counter.json",
+                b"{\"n\":3}".to_vec(),
+                Some(base),
+                "our update",
+                Some("op-ours".to_string()),
+            ),
+            1,
+        )
+        .expect("verdict");
+    match &resolution {
+        crosslink::state_broker::CasResolution::ReconcileRequired { reason, .. } => {
+            assert!(
+                matches!(
+                    reason,
+                    crosslink::state_broker::ReconcileReason::OverlappingPaths { .. }
+                ),
+                "{reason:?}"
+            );
+        }
+        other => panic!("expected ReconcileRequired, got {other:?}"),
+    }
+    assert_eq!(
+        broker.file("shared/counter.json").unwrap(),
+        b"{\"n\":2}".to_vec(),
+        "the competing writer's bytes must survive"
+    );
+}
+
+/// Non-ASCII commit messages must not panic the client or the broker's
+/// validator (the byte-slice panic class), and must round-trip.
+#[test]
+fn non_ascii_commit_messages_round_trip() {
+    let broker = StubBroker::start();
+    broker.seed(vec![("a.json", b"{}".to_vec())]);
+    let client = broker.client();
+
+    for (message, path) in [
+        ("éééé", "b.json"),
+        ("€€€ broker note", "c.json"),
+        ("日本語のメモ", "d.json"),
+    ] {
+        let outcome = client
+            .commit(&CommitRequest::single(
+                path,
+                b"{}".to_vec(),
+                broker.head(),
+                message,
+                None,
+            ))
+            .unwrap_or_else(|e| panic!("message {message:?} must be accepted: {e}"));
+        assert!(outcome.verified);
+    }
+}
+
+/// The broker's reported project identity is bound to the configuration: a
+/// broker answering for another project is a hard error, not data.
+#[test]
+fn broker_project_identity_mismatch_is_a_hard_error() {
+    const OTHER_UUID: &str = "2a551ed0-cdc0-4e2b-a98d-e6445679b827";
+    let broker = StubBroker::start();
+    broker.seed(vec![("a.json", b"{}".to_vec())]);
+    let client = broker.client();
+
+    // Baseline: identity matches.
+    assert_eq!(client.read_state().unwrap().project.uuid, UUID);
+
+    broker.set_project_uuid_override(Some(OTHER_UUID));
+    let error = client.read_state().unwrap_err();
+    assert!(error.is_identity_mismatch(), "{error:?}");
+    assert!(!error.retryable());
+    let error = client.whoami().unwrap_err();
+    assert!(error.is_identity_mismatch(), "{error:?}");
+
+    broker.set_project_uuid_override(None);
+    assert_eq!(client.read_state().unwrap().project.uuid, UUID);
 }
 
 #[test]

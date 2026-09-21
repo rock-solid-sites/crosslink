@@ -22,6 +22,13 @@
 //! fallback, because a silent fallback would write durable state to the wrong
 //! backend.
 //!
+//! A present-but-unparsable `hook-config.json` is a hard error **when it may
+//! contain the selection key** (the raw text mentions `state_backend`): a
+//! corrupt config that may have selected the broker must never silently revert
+//! to Local. When the file neither parses nor mentions the key, the backend is
+//! Local with a warning — the file is shared with unrelated configuration and
+//! this adapter must not turn unrelated config damage into a hard failure.
+//!
 //! The broker environment variables match the broker's own Codex Cloud
 //! contract: `CROSSLINK_STATE_BROKER_URL`, `CROSSLINK_STATE_BROKER_TOKEN`,
 //! `CROSSLINK_STATE_PROJECT_UUID`, `CROSSLINK_STATE_TIMEOUT_MS`.
@@ -273,8 +280,7 @@ impl StateBrokerConfig {
     }
 
     /// The durable state branch this project's namespace uses.
-    #[must_use]
-    pub fn state_branch(&self) -> String {
+    fn state_branch(&self) -> String {
         format!("projects/{}/state", self.project_uuid)
     }
 
@@ -390,15 +396,6 @@ impl StateBackend {
             Self::Local => None,
         }
     }
-
-    /// Consume the selection, yielding broker settings when selected.
-    #[must_use]
-    pub fn into_broker(self) -> Option<StateBrokerConfig> {
-        match self {
-            Self::Broker(config) => Some(config),
-            Self::Local => None,
-        }
-    }
 }
 
 /// Default root for a disposable broker state projection inside a Crosslink
@@ -466,21 +463,33 @@ fn read_token_file(path: &str) -> Result<String, StateBrokerError> {
 
 /// Read the optional `state_backend` key from `.crosslink/hook-config.json`.
 ///
-/// A missing file or key yields `None`. An unparsable file yields `None` with a
-/// warning (the file is shared with unrelated configuration; this key must not
-/// turn a pre-existing config into a hard failure). A non-string value is a
-/// configuration error.
+/// A missing file or key yields `None` (Local). A non-string value is a
+/// configuration error. An unparsable file is a hard configuration error when
+/// the raw text mentions the selection key — the file may have selected the
+/// broker and falling back to Local would silently route durable state to the
+/// wrong backend. When the raw text does not mention the key, the file cannot
+/// have selected a backend, so the adapter warns and yields `None`.
 fn read_hook_config_backend(crosslink_dir: &Path) -> Result<Option<String>, StateBrokerError> {
     let path = crosslink_dir.join("hook-config.json");
     let Ok(raw) = std::fs::read_to_string(&path) else {
         return Ok(None);
     };
-    let Ok(value) = serde_json::from_str::<Value>(&raw) else {
-        tracing::warn!(
-            "{} is not valid JSON; ignoring {HOOK_CONFIG_KEY}",
-            path.display()
-        );
-        return Ok(None);
+    let value = match serde_json::from_str::<Value>(&raw) {
+        Ok(value) => value,
+        Err(error) => {
+            if raw.contains(HOOK_CONFIG_KEY) {
+                return Err(configuration_error(format!(
+                    "{} is not valid JSON and may select {HOOK_CONFIG_KEY}; refusing to \
+                     silently fall back to Local: {error}",
+                    path.display()
+                )));
+            }
+            tracing::warn!(
+                "{} is not valid JSON; ignoring {HOOK_CONFIG_KEY} (key not present)",
+                path.display()
+            );
+            return Ok(None);
+        }
     };
     match value.get(HOOK_CONFIG_KEY) {
         None | Some(Value::Null) => Ok(None),
@@ -696,6 +705,51 @@ mod tests {
             .unwrap_err();
         assert_eq!(error.code(), BrokerErrorCode::Configuration);
         assert!(error.message().contains(ENV_BROKER_URL));
+    }
+
+    /// A corrupt shared config file that may have selected the broker must not
+    /// silently revert to Local: that would route durable state to the wrong
+    /// backend.
+    #[test]
+    fn corrupt_hook_config_mentioning_the_key_is_a_hard_error() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("hook-config.json"),
+            "{\"state_backend\": \"broker\", \"other\": ",
+        )
+        .unwrap();
+        let error = StateBackend::resolve_with(dir.path(), lookup_from(&[])).unwrap_err();
+        assert_eq!(error.code(), BrokerErrorCode::Configuration);
+        assert!(
+            error.message().contains("refusing"),
+            "error must say it refuses to fall back: {}",
+            error.message()
+        );
+
+        // An explicit environment selection still wins (the corrupt file is
+        // never consulted), and it must not be blocked by the corrupt file.
+        let backend =
+            StateBackend::resolve_with(dir.path(), lookup_from(&[(ENV_BACKEND, "git")])).unwrap();
+        assert_eq!(backend.label(), "local");
+    }
+
+    /// A corrupt file that cannot contain the selection key stays fail-safe to
+    /// Local (the file is shared with unrelated configuration).
+    #[test]
+    fn corrupt_hook_config_without_the_key_stays_local() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("hook-config.json"), "{ this is not json ").unwrap();
+        let backend = StateBackend::resolve_with(dir.path(), lookup_from(&[])).unwrap();
+        assert_eq!(backend.label(), "local");
+    }
+
+    #[test]
+    fn non_string_selection_key_is_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("hook-config.json"), "{\"state_backend\": 7}").unwrap();
+        let error = StateBackend::resolve_with(dir.path(), lookup_from(&[])).unwrap_err();
+        assert_eq!(error.code(), BrokerErrorCode::Configuration);
+        assert!(error.message().contains(HOOK_CONFIG_KEY));
     }
 
     #[test]

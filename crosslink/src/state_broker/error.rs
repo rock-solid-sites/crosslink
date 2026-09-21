@@ -2,9 +2,20 @@
 //!
 //! The broker's error contract is documented in
 //! `crosslink-state-broker/docs`/`README.md` (`error.code` values are part of
-//! the public contract). This module mirrors that contract and adds the three
+//! the public contract). This module mirrors that contract and adds the
 //! client-side failure classes Crosslink can hit before a broker envelope
-//! exists: `transport`, `protocol`, and `configuration`.
+//! exists: `transport`, `protocol`, `configuration`, `local_io`,
+//! `reconcile_required`, and `identity_mismatch`.
+//!
+//! # Reconcile-required is not retryable
+//!
+//! A write can fail *after* the broker accepted it (timeout, lost response,
+//! upstream read-back mismatch, a success envelope carrying
+//! `verified: false`). Those failures are [`BrokerErrorCode::ReconcileRequired`]:
+//! the caller must reconcile by `op_id`
+//! ([`crate::state_broker::ProjectStateTransport::reconcile`]) before deciding
+//! whether to write again. They are never retryable: a blind retry of a write
+//! is exactly what the broker contract forbids.
 //!
 //! # Secret safety
 //!
@@ -55,27 +66,19 @@ pub enum BrokerErrorCode {
     Protocol,
     /// Client-side: the local configuration is incomplete or invalid.
     Configuration,
-    /// Client-side: local filesystem work failed (e.g. writing a projection).
+    /// Client-side: local filesystem/projection work failed, or a local
+    /// projection is stale/partial/unidentifiable.
     LocalIo,
+    /// Client-side: a write's outcome is unknown (ambiguous transport failure,
+    /// upstream read-back mismatch, `verified: false`, or a refused automatic
+    /// rebase). Reconcile by `op_id`; never blind-retry.
+    ReconcileRequired,
+    /// Client-side: the broker reported a project identity or state ref that
+    /// contradicts the configuration. The response belongs to another project.
+    IdentityMismatch,
 }
 
 impl BrokerErrorCode {
-    /// Every variant.
-    pub const ALL: &'static [Self] = &[
-        Self::Unauthorized,
-        Self::ScopeViolation,
-        Self::InvalidInput,
-        Self::NotFound,
-        Self::StaleState,
-        Self::MethodNotAllowed,
-        Self::UpstreamError,
-        Self::InternalError,
-        Self::Transport,
-        Self::Protocol,
-        Self::Configuration,
-        Self::LocalIo,
-    ];
-
     /// The subset that is part of the broker's public wire contract.
     pub const CONTRACT_CODES: &'static [Self] = &[
         Self::Unauthorized,
@@ -104,6 +107,8 @@ impl BrokerErrorCode {
             Self::Protocol => "protocol",
             Self::Configuration => "configuration",
             Self::LocalIo => "local_io",
+            Self::ReconcileRequired => "reconcile_required",
+            Self::IdentityMismatch => "identity_mismatch",
         }
     }
 
@@ -127,13 +132,14 @@ impl BrokerErrorCode {
     /// Default retryability for a code when no envelope `retryable` field is
     /// available. `stale_state` is retryable *only* through the reconciled
     /// CAS path ([`crate::state_broker::ProjectStateTransport::commit_cas`]);
-    /// a blind retry of a write is never allowed.
+    /// a blind retry of a write is never allowed. `upstream_error` defaults to
+    /// **not** retryable, matching the broker's own default
+    /// (`errors.ts`: `options.retryable ?? false`): for a write the honest
+    /// answer is "reconcile", and a read can be retried after reconciliation.
+    /// `reconcile_required` and `identity_mismatch` are never retryable.
     #[must_use]
     pub const fn default_retryable(self) -> bool {
-        matches!(
-            self,
-            Self::StaleState | Self::Transport | Self::UpstreamError
-        )
+        matches!(self, Self::StaleState | Self::Transport)
     }
 }
 
@@ -216,6 +222,24 @@ impl StateBrokerError {
         Self::client(BrokerErrorCode::LocalIo, message.into())
     }
 
+    /// Client-side "the write outcome is unknown; reconcile by op id".
+    ///
+    /// `details` SHOULD carry `reason` plus whatever identifying data is known
+    /// (`op_id`, `commit`, `observed_head`, `failed_paths`). Never retryable.
+    #[must_use]
+    pub fn reconcile_required(message: impl Into<String>, details: Option<Value>) -> Self {
+        Self {
+            details,
+            ..Self::client(BrokerErrorCode::ReconcileRequired, message.into())
+        }
+    }
+
+    /// Client-side "the broker's reported identity contradicts configuration".
+    #[must_use]
+    pub fn identity_mismatch(message: impl Into<String>) -> Self {
+        Self::client(BrokerErrorCode::IdentityMismatch, message.into())
+    }
+
     const fn client(code: BrokerErrorCode, message: String) -> Self {
         Self {
             code,
@@ -278,16 +302,27 @@ impl StateBrokerError {
         matches!(self.code, BrokerErrorCode::StaleState)
     }
 
-    /// True when the broker's read-back disagreed with the write. The write
-    /// may have landed — reconcile before retrying.
+    /// True when a write's outcome is unknown and the caller must reconcile by
+    /// `op_id` before deciding whether to write again.
     #[must_use]
-    pub fn is_readback_mismatch(&self) -> bool {
-        self.code == BrokerErrorCode::UpstreamError
-            && self
-                .details
-                .as_ref()
-                .and_then(|d| d.get("failed_paths"))
-                .is_some()
+    pub const fn is_reconcile_required(&self) -> bool {
+        matches!(self.code, BrokerErrorCode::ReconcileRequired)
+    }
+
+    /// True when the failure is a broker identity contradiction.
+    #[must_use]
+    pub const fn is_identity_mismatch(&self) -> bool {
+        matches!(self.code, BrokerErrorCode::IdentityMismatch)
+    }
+
+    /// The machine-readable reconcile reason from `details.reason`, when the
+    /// error is a `reconcile_required` failure.
+    #[must_use]
+    pub fn reconcile_reason(&self) -> Option<&str> {
+        self.details
+            .as_ref()
+            .and_then(|details| details.get("reason"))
+            .and_then(Value::as_str)
     }
 }
 
@@ -372,6 +407,51 @@ mod tests {
         assert!(error.retryable());
         assert_eq!(error.http_status(), Some(409));
         assert_eq!(error.request_id(), Some("req-1"));
+    }
+
+    #[test]
+    fn reconcile_required_and_identity_mismatch_are_never_retryable() {
+        let error = StateBrokerError::reconcile_required(
+            "write outcome unknown; reconcile by op id",
+            Some(json!({"reason": "readback_mismatch", "op_id": "op-1"})),
+        );
+        assert!(error.is_reconcile_required());
+        assert_eq!(error.code(), BrokerErrorCode::ReconcileRequired);
+        assert_eq!(error.code().as_str(), "reconcile_required");
+        assert!(!error.retryable());
+        assert_eq!(error.reconcile_reason(), Some("readback_mismatch"));
+
+        let error = StateBrokerError::identity_mismatch("broker reports another project");
+        assert!(error.is_identity_mismatch());
+        assert_eq!(error.code(), BrokerErrorCode::IdentityMismatch);
+        assert!(!error.retryable());
+        assert_eq!(error.reconcile_reason(), None);
+    }
+
+    #[test]
+    fn upstream_error_defaults_to_not_retryable() {
+        // Mirror the broker's own default (`errors.ts`: `options.retryable ?? false`).
+        assert!(!BrokerErrorCode::UpstreamError.default_retryable());
+        assert!(BrokerErrorCode::StaleState.default_retryable());
+        assert!(BrokerErrorCode::Transport.default_retryable());
+    }
+
+    #[test]
+    fn client_codes_are_not_wire_codes() {
+        for client_code in [
+            BrokerErrorCode::Transport,
+            BrokerErrorCode::Protocol,
+            BrokerErrorCode::Configuration,
+            BrokerErrorCode::LocalIo,
+            BrokerErrorCode::ReconcileRequired,
+            BrokerErrorCode::IdentityMismatch,
+        ] {
+            assert!(
+                !BrokerErrorCode::CONTRACT_CODES.contains(&client_code),
+                "{client_code} must not be treated as a broker wire code"
+            );
+            assert_eq!(BrokerErrorCode::from_contract_str(client_code.as_str()), None);
+        }
     }
 
     #[test]

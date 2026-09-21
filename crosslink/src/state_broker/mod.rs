@@ -46,8 +46,8 @@
 //! before construction. The token is sent only in the `Authorization` header,
 //! only to the configured broker host.
 
-pub mod client;
 pub mod cdp1;
+pub mod client;
 pub mod config;
 pub mod digest;
 pub mod error;

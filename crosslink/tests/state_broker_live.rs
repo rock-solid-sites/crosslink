@@ -84,3 +84,108 @@ fn live_broker_read_only_probe() {
         serde_json::to_string_pretty(&summary).expect("summary")
     );
 }
+
+// ── CDP-1 pre-L1 evidence probes (read-only; ignored by default) ─────
+
+/// Read-only probe: can the deployed broker serve blobs/verify at a
+/// **non-head** commit? (Pre-L1 gate 2.)
+///
+/// Set `CROSSLINK_STATE_HISTORICAL_COMMIT` to a non-head commit sha and
+/// `CROSSLINK_STATE_HISTORICAL_PATH` to a path that existed at that commit.
+/// With no variables set, the probe reports the gap and does nothing.
+#[test]
+#[ignore = "live broker probe; run explicitly with --ignored (read-only)"]
+fn live_historical_commit_read_probe() {
+    let Ok(commit) = std::env::var("CROSSLINK_STATE_HISTORICAL_COMMIT") else {
+        println!(
+            "SKIP: set CROSSLINK_STATE_HISTORICAL_COMMIT (and \
+             CROSSLINK_STATE_HISTORICAL_PATH) to probe non-head reads. \
+             No write is performed; without a known non-head commit this gate \
+             cannot be resolved from the client side."
+        );
+        return;
+    };
+    let path = std::env::var("CROSSLINK_STATE_HISTORICAL_PATH")
+        .expect("CROSSLINK_STATE_HISTORICAL_PATH is required with the commit");
+    let config = StateBrokerConfig::from_env()
+        .expect("broker configuration must be valid")
+        .expect("no broker configuration found");
+    let client = StateBrokerClient::new(config).expect("client construction");
+    let state = client.read_state().expect("state read");
+    let head = state.state.head_commit().map(str::to_string);
+    assert_ne!(
+        head.as_deref(),
+        Some(commit.as_str()),
+        "the probe requires a NON-head commit"
+    );
+    let blob = client
+        .read_blob(&path, Some(&commit))
+        .expect("historical blob read");
+    assert_eq!(blob.commit, commit);
+    let bytes = blob.bytes().expect("blob digest");
+    let verified = client
+        .verify(&commit, &[path.clone()])
+        .expect("historical verify");
+    println!(
+        "{}",
+        serde_json::json!({
+            "historical_commit": commit,
+            "path": path,
+            "bytes": bytes.len(),
+            "sha256": blob.sha256,
+            "verify_entries": verified.entries.len(),
+            "head": head,
+            "writes_performed": 0,
+            "conclusion": "deployed broker serves non-head commits",
+        })
+    );
+}
+
+/// Read-only probe: corroborate the documented broker limits from the client
+/// side, and report which parts remain unresolved without a write.
+///
+/// This sends only GETs: an over-limit `verify` path list and an over-long
+/// `read_blob` path, both of which the broker rejects before any state access.
+/// The decoded-vs-wire byte accounting **cannot** be resolved by reads; that
+/// gap is reported explicitly.
+#[test]
+#[ignore = "live broker probe; run explicitly with --ignored (read-only)"]
+fn live_limit_probe_reports_accounting_gap() {
+    let config = StateBrokerConfig::from_env()
+        .expect("broker configuration must be valid")
+        .expect("no broker configuration found");
+    let client = StateBrokerClient::new(config).expect("client construction");
+    let state = client.read_state().expect("state read");
+    let head = state
+        .state
+        .head_commit()
+        .expect("the project must have a head for the probe")
+        .to_string();
+
+    // 33 distinct paths: the broker documents a 32-path verify cap.
+    let paths: Vec<String> = (0..33)
+        .map(|index| format!("probe/limit-{index}.json"))
+        .collect();
+    let verify_error = client
+        .verify(&head, &paths)
+        .expect_err("33 verify paths must be rejected");
+    let over_long = format!("probe/{}", "x".repeat(300));
+    let blob_error = client
+        .read_blob(&over_long, Some(&head))
+        .expect_err("an over-long path must be rejected");
+
+    println!(
+        "{}",
+        serde_json::json!({
+            "verify_path_cap_enforced": verify_error.code().as_str(),
+            "verify_path_cap_message": verify_error.message(),
+            "path_grammar_enforced": blob_error.code().as_str(),
+            "path_grammar_message": blob_error.message(),
+            "byte_accounting": "UNRESOLVED: decoded-vs-wire limit accounting cannot be \
+                                determined by read-only requests; it requires the broker \
+                                source or a reviewed live boundary probe (L2) on a \
+                                synthetic project",
+            "writes_performed": 0,
+        })
+    );
+}

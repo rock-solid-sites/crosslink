@@ -54,14 +54,13 @@ pub use manifest::{
 pub use payload::{gzip_decode_bounded, gzip_encode, join_payload, split_payload};
 #[allow(unused_imports)]
 pub use projection::{
-    verify_derived_projection, write_derived_projection, DerivedProjectionMarker,
-    ProjectionFileV2,
+    verify_derived_projection, write_derived_projection, DerivedProjectionMarker, ProjectionFileV2,
 };
 #[allow(unused_imports)]
 pub use publisher::{
     classify_head, plan_publish, publish_checkpoint, Cdp1Config, DivergenceReason, HeadVerdict,
-    PublishOptions, PublishOutcome, PublishPlan, PublisherIdentity, RefusalReason,
-    ReconcileFailure,
+    PublishOptions, PublishOutcome, PublishPlan, PublisherIdentity, ReconcileFailure,
+    RefusalReason,
 };
 #[allow(unused_imports)]
 pub use reader::{read_derived_checkpoint, Provenance, ReadExpectations, VerifiedCheckpoint};
@@ -204,7 +203,10 @@ mod core_tests {
         assert_eq!(AccountingModel::Wire.max_payload_bytes(), 782_336);
         for model in [AccountingModel::Decoded, AccountingModel::Wire] {
             let slots = model.max_payload_bytes().div_ceil(model.slot_bytes());
-            assert!(slots <= u64::from(MAX_SLOTS), "{model:?} needs {slots} slots");
+            assert!(
+                slots <= u64::from(MAX_SLOTS),
+                "{model:?} needs {slots} slots"
+            );
         }
     }
 }

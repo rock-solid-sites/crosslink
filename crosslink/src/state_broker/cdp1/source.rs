@@ -7,9 +7,9 @@ use std::process::Command;
 use super::{SOURCE_REF, SOURCE_STATE_PATH, SOURCE_TRACKING_REF};
 use crate::checkpoint::CheckpointState;
 use crate::events::OrderingKey;
+use crate::state_broker::cdp1::manifest::SourceCheckpoint;
 use crate::state_broker::config::StateBrokerConfig;
 use crate::state_broker::error::StateBrokerError;
-use crate::state_broker::cdp1::manifest::SourceCheckpoint;
 
 /// The exact pushed checkpoint blob a publish derives from.
 #[derive(Debug, Clone)]
@@ -130,14 +130,12 @@ impl GitCheckpointSource {
 impl CheckpointSource for GitCheckpointSource {
     fn resolve_pushed_checkpoint(&self) -> Result<PushedCheckpoint, StateBrokerError> {
         self.fetch_checkpoint()?;
-        let commit = self
-            .rev_parse(SOURCE_TRACKING_REF)?
-            .ok_or_else(|| {
-                StateBrokerError::configuration(format!(
-                    "{SOURCE_TRACKING_REF} is absent after a successful fetch; \
+        let commit = self.rev_parse(SOURCE_TRACKING_REF)?.ok_or_else(|| {
+            StateBrokerError::configuration(format!(
+                "{SOURCE_TRACKING_REF} is absent after a successful fetch; \
                      no pushed v3 checkpoint exists to publish"
-                ))
-            })?;
+            ))
+        })?;
         let blob_spec = format!("{commit}:{SOURCE_STATE_PATH}");
         let state_blob_sha = self.rev_parse(&blob_spec)?.ok_or_else(|| {
             StateBrokerError::configuration(format!(
@@ -230,9 +228,7 @@ impl RepositoryBinding {
     ///
     /// Returns a configuration error when the file exists but is unreadable or
     /// the binding is malformed.
-    pub fn from_hook_config(
-        crosslink_dir: &Path,
-    ) -> Result<Option<Self>, StateBrokerError> {
+    pub fn from_hook_config(crosslink_dir: &Path) -> Result<Option<Self>, StateBrokerError> {
         let path = crosslink_dir.join("hook-config.json");
         let raw = match std::fs::read_to_string(&path) {
             Ok(raw) => raw,
@@ -245,10 +241,7 @@ impl RepositoryBinding {
             }
         };
         let value: serde_json::Value = serde_json::from_str(&raw).map_err(|e| {
-            StateBrokerError::configuration(format!(
-                "{} is not valid JSON: {e}",
-                path.display()
-            ))
+            StateBrokerError::configuration(format!("{} is not valid JSON: {e}", path.display()))
         })?;
         let Some(binding) = value.get(super::BINDING_KEY) else {
             return Ok(None);
@@ -375,7 +368,9 @@ pub fn repo_remote_url(crosslink_dir: &Path) -> Result<String, StateBrokerError>
         .current_dir(repo_root)
         .args(["remote", "get-url", &remote])
         .output()
-        .map_err(|e| StateBrokerError::configuration(format!("cannot run git remote get-url: {e}")))?;
+        .map_err(|e| {
+            StateBrokerError::configuration(format!("cannot run git remote get-url: {e}"))
+        })?;
     if !output.status.success() {
         return Err(StateBrokerError::configuration(format!(
             "git remote get-url {remote} failed: {}",
@@ -401,8 +396,14 @@ mod tests {
         ] {
             assert_eq!(normalize_remote(url), expected, "for {url}");
         }
-        assert_eq!(normalize_remote("git@example.com:team/sub/repo.git"), "example.com/team/sub/repo");
-        assert_eq!(normalize_remote("https://github.com:443/example/repo.git"), "github.com/example/repo");
+        assert_eq!(
+            normalize_remote("git@example.com:team/sub/repo.git"),
+            "example.com/team/sub/repo"
+        );
+        assert_eq!(
+            normalize_remote("https://github.com:443/example/repo.git"),
+            "github.com/example/repo"
+        );
     }
 
     #[test]
@@ -418,10 +419,16 @@ mod tests {
             )
             .unwrap();
         assert!(binding
-            .check("0f0e0d0c-0b0a-4908-8706-050403020100", "git@github.com:example/repo.git")
+            .check(
+                "0f0e0d0c-0b0a-4908-8706-050403020100",
+                "git@github.com:example/repo.git"
+            )
             .is_err());
         assert!(binding
-            .check("7f3c2a1e-9b4d-4c6a-8e2f-1d5b7a9c0e3f", "git@github.com:other/repo.git")
+            .check(
+                "7f3c2a1e-9b4d-4c6a-8e2f-1d5b7a9c0e3f",
+                "git@github.com:other/repo.git"
+            )
             .is_err());
     }
 

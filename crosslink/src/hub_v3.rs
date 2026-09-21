@@ -3124,7 +3124,10 @@ mod tests {
         let tip = git_rev_parse_optional(dir.path(), "refs/heads/crosslink/agents/hwm-agent")
             .unwrap()
             .unwrap();
-        let log = run_git_output(dir.path(), &["cat-file", "blob", &format!("{tip}:events.log")]);
+        let log = run_git_output(
+            dir.path(),
+            &["cat-file", "blob", &format!("{tip}:events.log")],
+        );
         assert_eq!(log.lines().count(), 1);
         // The next monotonic seq still appends.
         append_event_to_ref(dir.path(), agent_id, &make_envelope(agent_id, 2)).unwrap();
@@ -4693,10 +4696,7 @@ mod tests {
         std::fs::write(dir.path().join("README.md"), "# t\n").unwrap();
         run_git(dir.path(), &["add", "."]);
         run_git(dir.path(), &["commit", "-m", "init", "--no-gpg-sign"]);
-        run_git(
-            dir.path(),
-            &["branch", "crosslink/hub", "HEAD"],
-        );
+        run_git(dir.path(), &["branch", "crosslink/hub", "HEAD"]);
         dir
     }
 
@@ -4715,14 +4715,8 @@ mod tests {
     fn v2_file_path_decision_local_v3_markers_forbidden() {
         // Local v3 marker refs present → Forbidden (never run the v2 path).
         let dir = v2_only_local();
-        run_git(
-            dir.path(),
-            &["update-ref", META_REF, "HEAD"],
-        );
-        run_git(
-            dir.path(),
-            &["update-ref", CHECKPOINT_REF, "HEAD"],
-        );
+        run_git(dir.path(), &["update-ref", META_REF, "HEAD"]);
+        run_git(dir.path(), &["update-ref", CHECKPOINT_REF, "HEAD"]);
         let decision = v2_file_path_decision(dir.path(), "origin");
         assert!(
             !decision.is_allowed(),

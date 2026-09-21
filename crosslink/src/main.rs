@@ -1732,8 +1732,8 @@ enum KickoffCommands {
         /// NOT killed at this time — it is recorded in .kickoff-metadata.json
         /// and shown by `kickoff status`; a generous backstop
         /// (max(timeout*24, 24h), override via hook-config
-/// `kickoff.timeout_backstop_secs`) only guards against a wedged
-/// process (ASES #192).
+        /// `kickoff.timeout_backstop_secs`) only guards against a wedged
+        /// process (ASES #192).
         #[arg(long, default_value = "1h")]
         timeout: String,
         /// Print the agent prompt without launching
@@ -1820,8 +1820,8 @@ enum KickoffCommands {
         /// Expected task duration (guide, e.g. "30m", "1h"). The agent is
         /// NOT killed at this time — a generous backstop
         /// (max(timeout*24, 24h), override via hook-config
-/// `kickoff.timeout_backstop_secs`) only guards against a wedged
-/// process (ASES #192).
+        /// `kickoff.timeout_backstop_secs`) only guards against a wedged
+        /// process (ASES #192).
         #[arg(long, default_value = "30m")]
         timeout: String,
         /// Ref to branch the plan worktree from (mirrors `kickoff run --base`).
@@ -1910,8 +1910,8 @@ enum KickoffCommands {
         /// Expected task duration (guide, e.g. "1h", "30m"). The agent is
         /// NOT killed at this time — a generous backstop
         /// (max(timeout*24, 24h), override via hook-config
-/// `kickoff.timeout_backstop_secs`) only guards against a wedged
-/// process (ASES #192).
+        /// `kickoff.timeout_backstop_secs`) only guards against a wedged
+        /// process (ASES #192).
         #[arg(long, default_value = "1h")]
         timeout: String,
         /// Container runtime: none, docker, podman

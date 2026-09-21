@@ -58,7 +58,7 @@ struct MockState {
     /// Queue of errors returned *after* a commit has already landed (lost
     /// response simulation), consumed one per commit call.
     fail_after_landing: VecDeque<StateBrokerError>,
-    /// Number of read operations served (read_state/read_blob/verify).
+    /// Number of read operations served (`read_state`/`read_blob`/`verify`).
     read_calls: u64,
     /// Number of commit attempts (landed or failed).
     commit_attempts: u64,
@@ -245,7 +245,8 @@ impl MockStateTransport {
 
     /// Number of delete operations served (always zero: broker v1 has none).
     #[must_use]
-    pub fn delete_calls(&self) -> u64 {
+    #[allow(clippy::unused_self)]
+    pub const fn delete_calls(&self) -> u64 {
         0
     }
 

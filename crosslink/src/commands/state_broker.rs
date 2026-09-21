@@ -195,7 +195,8 @@ fn publish_checkpoint(
     let binding = RepositoryBinding::require_for(crosslink_dir, &config)
         .context("enforcing the repository↔project binding")?;
 
-    let client = StateBrokerClient::new(config.clone()).context("building the broker HTTP client")?;
+    let client =
+        StateBrokerClient::new(config.clone()).context("building the broker HTTP client")?;
     let identity = if dry_run {
         // Dry runs never touch the network; the scope is assumed, not checked.
         PublisherIdentity {
@@ -291,7 +292,13 @@ fn outcome_json(
                 "accounting": plan.accounting,
             },
         }),
-        PublishOutcome::Landed { commit, op_id, attempts, manifest_sha256, chunk_count } => {
+        PublishOutcome::Landed {
+            commit,
+            op_id,
+            attempts,
+            manifest_sha256,
+            chunk_count,
+        } => {
             serde_json::json!({
                 "outcome": "landed",
                 "commit": commit,
@@ -301,7 +308,11 @@ fn outcome_json(
                 "chunk_count": chunk_count,
             })
         }
-        PublishOutcome::LandedSuperseded { commit, head, op_id } => serde_json::json!({
+        PublishOutcome::LandedSuperseded {
+            commit,
+            head,
+            op_id,
+        } => serde_json::json!({
             "outcome": "landed_superseded",
             "commit": commit,
             "head": head,
@@ -312,23 +323,37 @@ fn outcome_json(
             "commit": commit,
             "op_id": op_id,
         }),
-        PublishOutcome::NotLanded { observed_head, op_id } => serde_json::json!({
+        PublishOutcome::NotLanded {
+            observed_head,
+            op_id,
+        } => serde_json::json!({
             "outcome": "not_landed",
             "observed_head": observed_head,
             "op_id": op_id,
         }),
-        PublishOutcome::Refused { reason, observed_head } => serde_json::json!({
+        PublishOutcome::Refused {
+            reason,
+            observed_head,
+        } => serde_json::json!({
             "outcome": "refused",
             "reason": reason.label(),
             "observed_head": observed_head,
         }),
-        PublishOutcome::ReconcileRequired { reason, observed_head, detail } => serde_json::json!({
+        PublishOutcome::ReconcileRequired {
+            reason,
+            observed_head,
+            detail,
+        } => serde_json::json!({
             "outcome": "reconcile_required",
             "reason": reason.label(),
             "observed_head": observed_head,
             "detail": detail,
         }),
-        PublishOutcome::Diverged { reason, observed_head, detail } => serde_json::json!({
+        PublishOutcome::Diverged {
+            reason,
+            observed_head,
+            detail,
+        } => serde_json::json!({
             "outcome": "diverged",
             "reason": reason.label(),
             "observed_head": observed_head,
@@ -367,10 +392,19 @@ fn print_outcome(outcome: &crate::state_broker::cdp1::PublishOutcome) {
             println!("  state bytes:    {}", plan.state_bytes);
             println!("  payload bytes:  {}", plan.payload_bytes);
             println!("  manifest bytes: {}", plan.manifest_bytes);
-            println!("  chunks:         {} ({})", plan.chunk_count, plan.accounting);
+            println!(
+                "  chunks:         {} ({})",
+                plan.chunk_count, plan.accounting
+            );
             println!("  files:          {}", plan.files);
         }
-        PublishOutcome::Landed { commit, op_id, attempts, chunk_count, .. } => {
+        PublishOutcome::Landed {
+            commit,
+            op_id,
+            attempts,
+            chunk_count,
+            ..
+        } => {
             println!("landed {commit} (op {op_id}, {attempts} attempt(s), {chunk_count} chunk(s))");
         }
         PublishOutcome::LandedSuperseded { commit, head, .. } => {
@@ -385,7 +419,10 @@ fn print_outcome(outcome: &crate::state_broker::cdp1::PublishOutcome) {
                 observed_head.as_deref().unwrap_or("(none)")
             );
         }
-        PublishOutcome::Refused { reason, observed_head } => {
+        PublishOutcome::Refused {
+            reason,
+            observed_head,
+        } => {
             println!(
                 "refused: {} (head {})",
                 reason.label(),

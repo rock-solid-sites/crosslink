@@ -112,6 +112,7 @@ pub struct AttemptRecord {
 impl AttemptRecord {
     /// Build a `prepared` record.
     #[must_use]
+    #[allow(clippy::too_many_arguments)]
     pub fn prepared(
         project_uuid: impl Into<String>,
         publisher_id: impl Into<String>,
@@ -150,19 +151,13 @@ impl AttemptRecord {
     /// `unknown` blocks until a successful reconcile; `diverged` is terminal.
     #[must_use]
     pub fn is_blocking(&self) -> bool {
-        match &self.resolution {
-            Some(resolution) => {
+        self.resolution.as_ref().map_or_else(
+            || self.is_unresolved(),
+            |resolution| {
                 matches!(resolution.outcome.as_str(), "unknown" | "diverged")
                     || self.is_unresolved()
-            }
-            None => self.is_unresolved(),
-        }
-    }
-
-    /// The source ref name recorded for this protocol.
-    #[must_use]
-    pub fn source_ref(&self) -> &'static str {
-        super::SOURCE_REF
+            },
+        )
     }
 
     /// The source state path recorded for this protocol.
@@ -193,14 +188,14 @@ impl AttemptStore {
 
     /// Store at an explicit path (tests).
     #[must_use]
-    pub fn at(path: PathBuf) -> Self {
+    pub const fn at(path: PathBuf) -> Self {
         Self { path }
     }
 
     /// The record path.
     #[must_use]
     pub fn path(&self) -> &Path {
-        &self.path
+        self.path.as_path()
     }
 
     /// Load the record, if present.

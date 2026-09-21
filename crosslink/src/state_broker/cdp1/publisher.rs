@@ -8,9 +8,7 @@
 
 use std::collections::HashMap;
 
-use super::attempt::{
-    AttemptPhase, AttemptRecord, AttemptResolution, AttemptSource, AttemptStore,
-};
+use super::attempt::{AttemptPhase, AttemptRecord, AttemptResolution, AttemptSource, AttemptStore};
 use super::capacity::{check_capacity, CapacityPlan};
 use super::manifest::{CheckpointManifestV1, Encoding, ManifestContext, SourceCheckpoint};
 use super::payload::{gzip_encode, split_payload};
@@ -22,9 +20,7 @@ use super::{
 use crate::events::OrderingKey;
 use crate::state_broker::client::{CommitFile, CommitRequest};
 use crate::state_broker::error::StateBrokerError;
-use crate::state_broker::transport::{
-    message_records_op, OpReconciliation, ProjectStateTransport,
-};
+use crate::state_broker::transport::{message_records_op, OpReconciliation, ProjectStateTransport};
 
 /// Static configuration for one publisher identity.
 #[derive(Debug, Clone)]
@@ -510,14 +506,11 @@ pub fn classify_head(
     match transport.read_blob(MANIFEST_PATH, Some(&head.commit)) {
         Ok(blob) => {
             let bytes = blob.bytes()?;
-            let manifest = match CheckpointManifestV1::from_slice(&bytes) {
-                Ok(manifest) => manifest,
-                Err(_) => {
-                    return Ok(HeadVerdict::Refuse {
-                        reason: RefusalReason::HeadManifestUnreadable,
-                        observed_head: Some(head.commit.clone()),
-                    });
-                }
+            let Ok(manifest) = CheckpointManifestV1::from_slice(&bytes) else {
+                return Ok(HeadVerdict::Refuse {
+                    reason: RefusalReason::HeadManifestUnreadable,
+                    observed_head: Some(head.commit.clone()),
+                });
             };
             match manifest.validate(&ctx) {
                 Ok(()) => {}
@@ -533,7 +526,7 @@ pub fn classify_head(
                     });
                 }
             }
-            classify_watermark(cfg, plan, &head.commit, &manifest)
+            Ok(classify_watermark(cfg, plan, &head.commit, &manifest))
         }
         Err(error) if error.code() == crate::state_broker::BrokerErrorCode::NotFound => {
             // No manifest: only an unrelated tree may be superseded.
@@ -564,31 +557,31 @@ fn classify_watermark(
     plan: &PublishPlan,
     head_commit: &str,
     manifest: &CheckpointManifestV1,
-) -> Result<HeadVerdict, StateBrokerError> {
+) -> HeadVerdict {
     let candidate_w = &plan.source.watermark;
     let head_w = &manifest.source.watermark;
     match candidate_w.cmp(head_w) {
-        std::cmp::Ordering::Greater => Ok(HeadVerdict::Supersede {
+        std::cmp::Ordering::Greater => HeadVerdict::Supersede {
             prior_op_id: Some(manifest.op_id.clone()),
             prior_watermark: Some(head_w.clone()),
             takeover: manifest.publisher_id != cfg.publisher_id,
-        }),
+        },
         std::cmp::Ordering::Equal => {
             if manifest.source.state_sha256 == plan.source.state_sha256 {
-                Ok(HeadVerdict::AlreadyCurrent {
+                HeadVerdict::AlreadyCurrent {
                     commit: head_commit.to_string(),
                     op_id: manifest.op_id.clone(),
-                })
+                }
             } else {
-                Ok(HeadVerdict::Diverged {
+                HeadVerdict::Diverged {
                     observed_head: head_commit.to_string(),
-                })
+                }
             }
         }
-        std::cmp::Ordering::Less => Ok(HeadVerdict::Refuse {
+        std::cmp::Ordering::Less => HeadVerdict::Refuse {
             reason: RefusalReason::CandidateStale,
             observed_head: Some(head_commit.to_string()),
-        }),
+        },
     }
 }
 
@@ -645,11 +638,23 @@ impl ReconcileIntent {
 /// Verdict of an op-id reconciliation.
 #[derive(Debug, Clone)]
 pub(crate) enum ReconcileVerdict {
-    Landed { commit: String },
-    LandedSuperseded { commit: String, head: String },
-    NotLanded { observed_head: Option<String> },
-    Diverged { observed_head: String, detail: String },
-    Unknown { detail: String },
+    Landed {
+        commit: String,
+    },
+    LandedSuperseded {
+        commit: String,
+        head: String,
+    },
+    NotLanded {
+        observed_head: Option<String>,
+    },
+    Diverged {
+        observed_head: String,
+        detail: String,
+    },
+    Unknown {
+        detail: String,
+    },
 }
 
 /// Reconcile a possibly-ambiguous write by op id (spec §5.7).
@@ -663,7 +668,10 @@ pub(crate) fn reconcile(
         Ok(state) => state,
         Err(error) => {
             return ReconcileVerdict::Unknown {
-                detail: format!("cannot read durable state while reconciling: {}", error.message()),
+                detail: format!(
+                    "cannot read durable state while reconciling: {}",
+                    error.message()
+                ),
             };
         }
     };
@@ -705,8 +713,7 @@ pub(crate) fn reconcile(
                     }
                 }
                 _ => ReconcileVerdict::Unknown {
-                    detail: "the head records our op id but its manifest is unreadable"
-                        .to_string(),
+                    detail: "the head records our op id but its manifest is unreadable".to_string(),
                 },
             },
             Err(error) if error.code() == crate::state_broker::BrokerErrorCode::NotFound => {
@@ -715,7 +722,10 @@ pub(crate) fn reconcile(
                 }
             }
             Err(error) => ReconcileVerdict::Unknown {
-                detail: format!("cannot read the head manifest while reconciling: {}", error.message()),
+                detail: format!(
+                    "cannot read the head manifest while reconciling: {}",
+                    error.message()
+                ),
             },
         }
     } else if let Some(carried) = carried_commit {
@@ -734,9 +744,7 @@ pub(crate) fn reconcile(
                 Ok(false) => ReconcileVerdict::NotLanded {
                     observed_head: Some(head.commit.clone()),
                 },
-                Err(error)
-                    if error.code() == crate::state_broker::BrokerErrorCode::NotFound =>
-                {
+                Err(error) if error.code() == crate::state_broker::BrokerErrorCode::NotFound => {
                     // The carried commit is not readable: the broker never
                     // attached it, so nothing of ours landed. Re-classifying
                     // the current head is safe (a landed-but-unreadable commit
@@ -773,7 +781,9 @@ fn verify_paths_at(
     // The verify response is self-consistent only if every listed path is
     // present with a digest; the caller compares those digests against the
     // intended payload via `paths_match_intent`.
-    Ok(entries.iter().all(|entry| entry.present && entry.sha256.is_some()))
+    Ok(entries
+        .iter()
+        .all(|entry| entry.present && entry.sha256.is_some()))
 }
 
 /// Compare read-back entries against the intended per-path digests.
@@ -897,7 +907,10 @@ fn read_back_and_resolve(
                 return PublishOutcome::ReconcileRequired {
                     reason: ReconcileFailure::AmbiguousWrite,
                     observed_head: Some(commit.to_string()),
-                    detail: format!("full reconstruction could not decompress: {}", error.message()),
+                    detail: format!(
+                        "full reconstruction could not decompress: {}",
+                        error.message()
+                    ),
                 };
             }
         }
@@ -925,7 +938,10 @@ fn read_back_and_resolve(
         Err(error) => PublishOutcome::ReconcileRequired {
             reason: ReconcileFailure::AmbiguousWrite,
             observed_head: Some(commit.to_string()),
-            detail: format!("landed at {commit} but the head could not be re-read: {}", error.message()),
+            detail: format!(
+                "landed at {commit} but the head could not be re-read: {}",
+                error.message()
+            ),
         },
     }
 }
@@ -956,7 +972,7 @@ fn resolve_attempt(
 /// Returns an error only for local/source failures that are neither a publish
 /// outcome nor a broker refusal; every broker-side ambiguity is represented in
 /// [`PublishOutcome`].
-#[allow(clippy::too_many_lines)]
+#[allow(clippy::too_many_lines, clippy::trivially_copy_pass_by_ref)]
 pub fn publish_checkpoint(
     transport: &dyn ProjectStateTransport,
     source: &dyn CheckpointSource,
@@ -1003,7 +1019,13 @@ pub fn publish_checkpoint(
                 let intent = ReconcileIntent::from_attempt(&record);
                 match reconcile(transport, cfg, &intent, None) {
                     ReconcileVerdict::Landed { commit } => {
-                        resolve_attempt(Some(store), &mut record, "landed", Some(commit.clone()), None);
+                        resolve_attempt(
+                            Some(store),
+                            &mut record,
+                            "landed",
+                            Some(commit.clone()),
+                            None,
+                        );
                         return Ok(PublishOutcome::Landed {
                             commit,
                             op_id: record.op_id.clone(),
@@ -1013,7 +1035,13 @@ pub fn publish_checkpoint(
                         });
                     }
                     ReconcileVerdict::LandedSuperseded { commit, head } => {
-                        resolve_attempt(Some(store), &mut record, "landed_superseded", Some(commit.clone()), None);
+                        resolve_attempt(
+                            Some(store),
+                            &mut record,
+                            "landed_superseded",
+                            Some(commit.clone()),
+                            None,
+                        );
                         return Ok(PublishOutcome::LandedSuperseded {
                             commit,
                             head,
@@ -1029,7 +1057,11 @@ pub fn publish_checkpoint(
                             &mut record,
                             "diverged",
                             Some(observed_head.clone()),
-                            Some(DivergenceReason::OpIdReusedWithDifferentContent.label().to_string()),
+                            Some(
+                                DivergenceReason::OpIdReusedWithDifferentContent
+                                    .label()
+                                    .to_string(),
+                            ),
                         );
                         return Ok(PublishOutcome::Diverged {
                             reason: DivergenceReason::OpIdReusedWithDifferentContent,
@@ -1146,17 +1178,33 @@ pub fn publish_checkpoint(
         attempts_made = attempts_made.saturating_add(1);
         match transport.commit(&request) {
             Ok(outcome) if outcome.verified => {
-                let resolved =
-                    read_back_and_resolve(transport, &plan, &outcome.commit, attempts_made, opts.verify_full);
+                let resolved = read_back_and_resolve(
+                    transport,
+                    &plan,
+                    &outcome.commit,
+                    attempts_made,
+                    opts.verify_full,
+                );
                 finish(&resolved, attempts, &mut record);
                 return Ok(resolved);
             }
             Ok(outcome) => {
                 // verified:false is an ambiguous write.
                 let carried = Some(outcome.commit.clone());
-                match reconcile(transport, cfg, &ReconcileIntent::from_plan(&plan, expected_head.clone()), carried.as_deref()) {
+                match reconcile(
+                    transport,
+                    cfg,
+                    &ReconcileIntent::from_plan(&plan, expected_head.clone()),
+                    carried.as_deref(),
+                ) {
                     ReconcileVerdict::Landed { commit } => {
-                        resolve_attempt(attempts, &mut record, "landed", Some(commit.clone()), None);
+                        resolve_attempt(
+                            attempts,
+                            &mut record,
+                            "landed",
+                            Some(commit.clone()),
+                            None,
+                        );
                         return Ok(PublishOutcome::Landed {
                             commit,
                             op_id: plan.op_id.clone(),
@@ -1166,7 +1214,13 @@ pub fn publish_checkpoint(
                         });
                     }
                     ReconcileVerdict::LandedSuperseded { commit, head } => {
-                        resolve_attempt(attempts, &mut record, "landed_superseded", Some(commit.clone()), None);
+                        resolve_attempt(
+                            attempts,
+                            &mut record,
+                            "landed_superseded",
+                            Some(commit.clone()),
+                            None,
+                        );
                         return Ok(PublishOutcome::LandedSuperseded {
                             commit,
                             head,
@@ -1182,7 +1236,11 @@ pub fn publish_checkpoint(
                             &mut record,
                             "diverged",
                             Some(observed_head.clone()),
-                            Some(DivergenceReason::OpIdReusedWithDifferentContent.label().to_string()),
+                            Some(
+                                DivergenceReason::OpIdReusedWithDifferentContent
+                                    .label()
+                                    .to_string(),
+                            ),
                         );
                         return Ok(PublishOutcome::Diverged {
                             reason: DivergenceReason::OpIdReusedWithDifferentContent,
@@ -1213,9 +1271,20 @@ pub fn publish_checkpoint(
             }
             Err(error) if is_ambiguous(&error) => {
                 let carried = carried_commit(&error);
-                match reconcile(transport, cfg, &ReconcileIntent::from_plan(&plan, expected_head.clone()), carried.as_deref()) {
+                match reconcile(
+                    transport,
+                    cfg,
+                    &ReconcileIntent::from_plan(&plan, expected_head.clone()),
+                    carried.as_deref(),
+                ) {
                     ReconcileVerdict::Landed { commit } => {
-                        resolve_attempt(attempts, &mut record, "landed", Some(commit.clone()), None);
+                        resolve_attempt(
+                            attempts,
+                            &mut record,
+                            "landed",
+                            Some(commit.clone()),
+                            None,
+                        );
                         return Ok(PublishOutcome::Landed {
                             commit,
                             op_id: plan.op_id.clone(),
@@ -1225,7 +1294,13 @@ pub fn publish_checkpoint(
                         });
                     }
                     ReconcileVerdict::LandedSuperseded { commit, head } => {
-                        resolve_attempt(attempts, &mut record, "landed_superseded", Some(commit.clone()), None);
+                        resolve_attempt(
+                            attempts,
+                            &mut record,
+                            "landed_superseded",
+                            Some(commit.clone()),
+                            None,
+                        );
                         return Ok(PublishOutcome::LandedSuperseded {
                             commit,
                             head,
@@ -1241,7 +1316,11 @@ pub fn publish_checkpoint(
                             &mut record,
                             "diverged",
                             Some(observed_head.clone()),
-                            Some(DivergenceReason::OpIdReusedWithDifferentContent.label().to_string()),
+                            Some(
+                                DivergenceReason::OpIdReusedWithDifferentContent
+                                    .label()
+                                    .to_string(),
+                            ),
                         );
                         return Ok(PublishOutcome::Diverged {
                             reason: DivergenceReason::OpIdReusedWithDifferentContent,
@@ -1273,10 +1352,16 @@ pub fn publish_checkpoint(
             Err(error) => {
                 // Auth/invalid/method/not-found: nothing was written.
                 let reason = format!("{}: {}", error.code().as_str(), error.message());
-                resolve_attempt(attempts, &mut record, "failed_closed", None, Some(reason.clone()));
+                resolve_attempt(
+                    attempts,
+                    &mut record,
+                    "failed_closed",
+                    None,
+                    Some(reason.clone()),
+                );
                 return Ok(PublishOutcome::FailedClosed { reason });
             }
-        };
+        }
 
         // Re-classify before the bounded retry: another publisher may have
         // advanced the head past our candidate while we were reconciling.
@@ -1312,7 +1397,13 @@ fn finish(outcome: &PublishOutcome, store: Option<&AttemptStore>, record: &mut A
             resolve_attempt(store, record, "landed", Some(commit.clone()), None);
         }
         PublishOutcome::LandedSuperseded { commit, .. } => {
-            resolve_attempt(store, record, "landed_superseded", Some(commit.clone()), None);
+            resolve_attempt(
+                store,
+                record,
+                "landed_superseded",
+                Some(commit.clone()),
+                None,
+            );
         }
         PublishOutcome::ReconcileRequired { detail, .. } => {
             resolve_attempt(store, record, "unknown", None, Some(detail.clone()));
@@ -1335,7 +1426,7 @@ fn finish(outcome: &PublishOutcome, store: Option<&AttemptStore>, record: &mut A
 }
 
 /// Whether a broker error leaves the write's outcome unknown (spec §5.7).
-fn is_ambiguous(error: &StateBrokerError) -> bool {
+const fn is_ambiguous(error: &StateBrokerError) -> bool {
     use crate::state_broker::BrokerErrorCode;
     error.is_stale_state()
         || error.is_reconcile_required()

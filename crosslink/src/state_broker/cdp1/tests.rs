@@ -4,21 +4,19 @@
 use std::sync::Mutex;
 
 use chrono::{DateTime, Utc};
+use std::collections::{BTreeMap, BTreeSet};
 
 use super::attempt::AttemptStore;
 use super::manifest::ManifestContext;
 use super::publisher::{
     new_op_id, plan_publish, plan_publish_with_op_id, publish_checkpoint, Cdp1Config,
-    HeadVerdict, PublishOptions, PublishOutcome, PublisherIdentity, RefusalReason,
+    PublishOptions, PublishOutcome, PublisherIdentity, RefusalReason,
 };
-use super::reader::{
-    read_derived_checkpoint, Provenance, ReadExpectations, ReaderDefect,
-};
+use super::reader::{read_derived_checkpoint, Provenance, ReadExpectations, ReaderDefect};
 use super::source::{CheckpointSource, JournalAnchor, PushedCheckpoint};
 use super::{AccountingModel, MANIFEST_PATH, MAX_SLOTS};
 use crate::checkpoint::CheckpointState;
 use crate::events::OrderingKey;
-use crate::state_broker::client::StateEntry;
 use crate::state_broker::error::StateBrokerError;
 use crate::state_broker::mock::MockStateTransport;
 use crate::state_broker::transport::ProjectStateTransport;
@@ -37,15 +35,19 @@ pub(crate) struct MockCheckpointSource {
 
 impl MockCheckpointSource {
     pub(crate) fn new(agent_seq: u64) -> Self {
-        Self::with_state(agent_seq, CheckpointState {
-            next_display_id: 42,
-            watermark: Some(OrderingKey {
-                timestamp: DateTime::<Utc>::UNIX_EPOCH + chrono::Duration::seconds(agent_seq as i64),
-                agent_id: "driver".to_string(),
-                agent_seq,
-            }),
-            ..Default::default()
-        })
+        Self::with_state(
+            agent_seq,
+            CheckpointState {
+                next_display_id: 42,
+                watermark: Some(OrderingKey {
+                    timestamp: DateTime::<Utc>::UNIX_EPOCH
+                        + chrono::Duration::seconds(agent_seq as i64),
+                    agent_id: "driver".to_string(),
+                    agent_seq,
+                }),
+                ..Default::default()
+            },
+        )
     }
 
     pub(crate) fn with_state(agent_seq: u64, state: CheckpointState) -> Self {
@@ -191,12 +193,12 @@ fn noisy_checkpoint(agent_seq: u64, noise_len: usize) -> MockCheckpointSource {
             closed_at: None,
             scheduled_at: None,
             due_at: None,
-            labels: Default::default(),
-            blockers: Default::default(),
-            related: Default::default(),
+            labels: BTreeSet::default(),
+            blockers: BTreeSet::default(),
+            related: BTreeSet::default(),
             milestone_uuid: None,
-            comments: Default::default(),
-            time_entries: Default::default(),
+            comments: BTreeMap::default(),
+            time_entries: BTreeMap::default(),
         },
     );
     state.watermark = Some(OrderingKey {
@@ -240,8 +242,9 @@ fn t01_t02_one_and_multiple_chunks_publish_and_read_back() {
     let big = noisy_checkpoint(2, 900_000);
     let transport = seeded_transport();
     let commit = publish_landed(&transport, &big);
-    let read = read_derived_checkpoint(&transport, &cfg(), &ReadExpectations::default(), Some(&big))
-        .unwrap();
+    let read =
+        read_derived_checkpoint(&transport, &cfg(), &ReadExpectations::default(), Some(&big))
+            .unwrap();
     assert!(read.manifest.chunk_count > 1, "expected multiple chunks");
     assert_eq!(read.state_bytes, big.checkpoint.state_bytes);
     assert_eq!(read.commit, commit);
@@ -260,13 +263,15 @@ fn t03_t04_shrinking_publish_leaves_old_slots_inert() {
     assert!(big_slots > 1);
 
     // Shrink to one chunk with a strictly higher watermark (timestamp first).
-    let mut small_state = CheckpointState::default();
-    small_state.next_display_id = 11;
-    small_state.watermark = Some(OrderingKey {
-        timestamp: Utc::now() + chrono::Duration::hours(1),
-        agent_id: "driver".to_string(),
-        agent_seq: 11,
-    });
+    let small_state = CheckpointState {
+        next_display_id: 11,
+        watermark: Some(OrderingKey {
+            timestamp: Utc::now() + chrono::Duration::hours(1),
+            agent_id: "driver".to_string(),
+            agent_seq: 11,
+        }),
+        ..CheckpointState::default()
+    };
     let small = MockCheckpointSource::with_state(11, small_state);
     match publish(&transport, &small, PublishOptions::default()) {
         PublishOutcome::Landed { .. } => {}
@@ -282,8 +287,13 @@ fn t03_t04_shrinking_publish_leaves_old_slots_inert() {
     assert!(paths.contains(&"checkpoint/chunks/0001".to_string()));
     assert_eq!(parsed.chunks.len(), 1);
     // The reader reconstructs from the active set only.
-    let read = read_derived_checkpoint(&transport, &cfg(), &ReadExpectations::default(), Some(&small))
-        .unwrap();
+    let read = read_derived_checkpoint(
+        &transport,
+        &cfg(),
+        &ReadExpectations::default(),
+        Some(&small),
+    )
+    .unwrap();
     assert_eq!(read.state_bytes, small.checkpoint.state_bytes);
     assert_eq!(read.manifest.chunk_count, 1);
 }
@@ -326,10 +336,8 @@ fn t07_wrong_chunk_ordering_is_refused() {
     let source = MockCheckpointSource::new(1);
     let transport = seeded_transport();
     publish_landed(&transport, &source);
-    let mut manifest = CheckpointManifestV1::from_slice(
-        &transport.file_bytes(MANIFEST_PATH).unwrap(),
-    )
-    .unwrap();
+    let mut manifest =
+        CheckpointManifestV1::from_slice(&transport.file_bytes(MANIFEST_PATH).unwrap()).unwrap();
     // Declare two chunks while listing one (ordering/count defect).
     manifest.chunk_count = 2;
     let bytes = serde_json::to_vec(&manifest).unwrap();
@@ -356,7 +364,7 @@ fn t08_wrong_digest_layers_are_distinguished() {
     )
     .unwrap();
     manifest.payload_sha256 = "0".repeat(64);
-    transport.corrupt_file(MANIFEST_PATH, &serde_json::to_vec(&manifest).unwrap());
+    transport.corrupt_file(MANIFEST_PATH, serde_json::to_vec(&manifest).unwrap());
     let error = read_derived_checkpoint(
         &transport,
         &cfg(),
@@ -431,14 +439,18 @@ fn t12_same_watermark_identical_replay_is_already_current() {
 }
 
 #[test]
+#[allow(clippy::redundant_clone)] // clone from a Drop-containing fixture
 fn t13_same_watermark_different_state_is_diverged() {
     let transport = seeded_transport();
     let first = MockCheckpointSource::new(3);
     publish_landed(&transport, &first);
     // Same watermark (agent_seq), different state content.
-    let mut state = CheckpointState::default();
-    state.next_display_id = 999;
-    state.watermark = first.checkpoint.state.watermark.clone();
+    let watermark = first.checkpoint.watermark.clone();
+    let state = CheckpointState {
+        next_display_id: 999,
+        watermark: Some(watermark),
+        ..CheckpointState::default()
+    };
     let different = MockCheckpointSource::with_state(3, state);
     match publish(&transport, &different, PublishOptions::default()) {
         PublishOutcome::Diverged { .. } => {}
@@ -447,16 +459,20 @@ fn t13_same_watermark_different_state_is_diverged() {
 }
 
 #[test]
+#[allow(clippy::redundant_clone)] // clone from a Drop-containing fixture
 fn t14_same_op_id_different_content_is_diverged() {
     let transport = seeded_transport();
     let source = MockCheckpointSource::new(4);
-    let original = plan_publish_with_op_id(&source, &cfg(), "ckpt-aaaaaaaaaaaa-0123456789abcdef")
-        .unwrap();
+    let original =
+        plan_publish_with_op_id(&source, &cfg(), "ckpt-aaaaaaaaaaaa-0123456789abcdef").unwrap();
 
     // A different plan reuses the op id and lands at an equal watermark.
-    let mut state = CheckpointState::default();
-    state.next_display_id = 1234;
-    state.watermark = source.checkpoint.state.watermark.clone();
+    let watermark = source.checkpoint.watermark.clone();
+    let state = CheckpointState {
+        next_display_id: 1234,
+        watermark: Some(watermark),
+        ..CheckpointState::default()
+    };
     let different = MockCheckpointSource::with_state(4, state);
     let different_plan =
         plan_publish_with_op_id(&different, &cfg(), original.op_id.clone()).unwrap();
@@ -468,12 +484,16 @@ fn t14_same_op_id_different_content_is_diverged() {
             path: MANIFEST_PATH.to_string(),
             content: different_plan.manifest_bytes.clone(),
         })
-        .chain(different_plan.chunks.iter().enumerate().map(|(slot, chunk)| {
-            crate::state_broker::client::CommitFile {
-                path: super::chunk_path(slot as u32),
-                content: chunk.clone(),
-            }
-        }))
+        .chain(
+            different_plan
+                .chunks
+                .iter()
+                .enumerate()
+                .map(|(slot, chunk)| crate::state_broker::client::CommitFile {
+                    path: super::chunk_path(slot as u32),
+                    content: chunk.clone(),
+                }),
+        )
         .collect(),
     };
     assert!(transport.commit(&request).unwrap().verified);
@@ -555,7 +575,10 @@ fn t19_unknown_read_during_reconcile_blocks() {
     let verdict = super::publisher::reconcile(&transport, &cfg(), &intent, None);
     match verdict {
         super::publisher::ReconcileVerdict::Unknown { detail } => {
-            assert!(detail.contains("cannot read durable state"), "detail: {detail}");
+            assert!(
+                detail.contains("cannot read durable state"),
+                "detail: {detail}"
+            );
         }
         other => panic!("expected Unknown, got {other:?}"),
     }
@@ -579,7 +602,10 @@ fn t20_oversized_checkpoint_fails_closed_with_zero_commits() {
         &PublishOptions::default(),
         None,
     );
-    assert!(result.is_err(), "oversized must fail before any broker call");
+    assert!(
+        result.is_err(),
+        "oversized must fail before any broker call"
+    );
     assert_eq!(transport.commit_count(), 0);
     assert_eq!(transport.read_calls(), 0);
 }
@@ -597,8 +623,9 @@ fn t21_exact_capacity_boundaries() {
         .chunks(model.slot_bytes() as usize)
         .map(<[u8]>::to_vec)
         .collect();
-    assert!(super::capacity::check_capacity(&[1u8], &over, &over_chunks, &[b' '; 16], model)
-        .is_err());
+    assert!(
+        super::capacity::check_capacity(&[1u8], &over, &over_chunks, &[b' '; 16], model).is_err()
+    );
     assert_eq!(MAX_SLOTS, 4);
 }
 
@@ -634,6 +661,25 @@ fn t23_source_checkpoint_mismatch_is_refused() {
     };
     let error = read_derived_checkpoint(&transport, &cfg(), &expect, Some(&source)).unwrap_err();
     assert_eq!(defect_of(&error), ReaderDefect::WrongCheckpoint.label());
+}
+
+#[test]
+fn t23b_unpushed_checkpoint_source_fails_closed() {
+    // A source whose fetch cannot prove durability must fail before any
+    // broker call.
+    let transport = seeded_transport();
+    let source = MockCheckpointSource::failing_fetch();
+    let result = publish_checkpoint(
+        &transport,
+        &source,
+        &cfg(),
+        &writer(),
+        &PublishOptions::default(),
+        None,
+    );
+    assert!(result.is_err(), "an unprovable source must fail closed");
+    assert_eq!(transport.read_calls(), 0);
+    assert_eq!(transport.commit_count(), 0);
 }
 
 #[test]
@@ -683,7 +729,8 @@ fn t27_reader_pins_one_commit_across_a_concurrent_publish() {
     // A read pinned to the old commit still reconstructs the old state.
     let blob = transport.read_blob(MANIFEST_PATH, Some(&pinned)).unwrap();
     assert_eq!(blob.commit, pinned);
-    let manifest = super::manifest::CheckpointManifestV1::from_slice(&blob.bytes().unwrap()).unwrap();
+    let manifest =
+        super::manifest::CheckpointManifestV1::from_slice(&blob.bytes().unwrap()).unwrap();
     assert_eq!(manifest.source.watermark.agent_seq, 1);
 }
 
@@ -816,13 +863,8 @@ fn t36_journal_anchored_and_advisory_profiles() {
     let source = MockCheckpointSource::new(1);
     publish_landed(&transport, &source);
 
-    let advisory = read_derived_checkpoint(
-        &transport,
-        &cfg(),
-        &ReadExpectations::default(),
-        None,
-    )
-    .unwrap();
+    let advisory =
+        read_derived_checkpoint(&transport, &cfg(), &ReadExpectations::default(), None).unwrap();
     assert_eq!(advisory.provenance, Provenance::Advisory);
 
     let anchored = read_derived_checkpoint(
@@ -965,6 +1007,7 @@ fn t43_vanished_ref_never_bootstraps() {
 }
 
 #[test]
+#[allow(clippy::redundant_clone)] // clone from a Drop-containing fixture
 fn t45_concurrent_bootstrap_race_is_handled() {
     let transport = seeded_transport();
     let first = MockCheckpointSource::new(1);
@@ -976,9 +1019,12 @@ fn t45_concurrent_bootstrap_race_is_handled() {
         publish(&transport, &same, PublishOptions::default()),
         PublishOutcome::AlreadyCurrent { .. }
     ));
-    let mut state = CheckpointState::default();
-    state.next_display_id = 77;
-    state.watermark = first.checkpoint.state.watermark.clone();
+    let watermark = first.checkpoint.watermark.clone();
+    let state = CheckpointState {
+        next_display_id: 77,
+        watermark: Some(watermark),
+        ..CheckpointState::default()
+    };
     let different = MockCheckpointSource::with_state(1, state);
     assert!(matches!(
         publish(&transport, &different, PublishOptions::default()),
@@ -1179,7 +1225,10 @@ fn t37_projection_write_verify_and_staleness() {
 
     // A tampered projected file is refused.
     let head_after = transport.head().unwrap();
-    assert_eq!(read_marker(dir.path()).unwrap().head_commit, marker.head_commit);
+    assert_eq!(
+        read_marker(dir.path()).unwrap().head_commit,
+        marker.head_commit
+    );
     assert_ne!(head_after, marker.head_commit);
     std::fs::write(dir.path().join(PROJECTED_STATE_PATH), b"tampered").unwrap();
     // Re-write the marker to point at the new head, then verify the digest.
@@ -1236,7 +1285,11 @@ fn t26_incomplete_projection_marker_is_refused() {
         Some(&source),
     )
     .unwrap_err();
-    assert!(error.message().contains("incomplete"), "{}", error.message());
+    assert!(
+        error.message().contains("incomplete"),
+        "{}",
+        error.message()
+    );
 }
 
 #[test]

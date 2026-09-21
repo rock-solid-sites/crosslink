@@ -7,11 +7,9 @@
 
 use std::collections::HashMap;
 
-use super::manifest::{
-    CheckpointManifestV1, ManifestContext, ManifestDefect, SourceCheckpoint,
-};
+use super::manifest::{CheckpointManifestV1, ManifestContext, ManifestDefect, SourceCheckpoint};
 use super::source::JournalAnchor;
-use super::{Cdp1Config, MAX_MANIFEST_BYTES, MANIFEST_PATH};
+use super::{Cdp1Config, MANIFEST_PATH, MAX_MANIFEST_BYTES};
 use crate::checkpoint::CheckpointState;
 use crate::events::OrderingKey;
 use crate::state_broker::client::StateEntry;
@@ -116,16 +114,16 @@ fn defect(defect: ReaderDefect, detail: impl Into<String>) -> StateBrokerError {
 
 fn manifest_defect(error: &super::manifest::ManifestError) -> StateBrokerError {
     let label = match error.defect {
-        ManifestDefect::WrongFormat => ReaderDefect::MalformedManifest,
+        ManifestDefect::WrongFormat
+        | ManifestDefect::WrongOrdering
+        | ManifestDefect::UnsupportedEncoding
+        | ManifestDefect::WrongOperation => ReaderDefect::MalformedManifest,
         ManifestDefect::WrongProject | ManifestDefect::WrongCheckpoint => {
             ReaderDefect::WrongCheckpoint
         }
         ManifestDefect::Corruption => ReaderDefect::CorruptState,
         ManifestDefect::Truncation => ReaderDefect::Truncated,
-        ManifestDefect::WrongOrdering => ReaderDefect::MalformedManifest,
         ManifestDefect::Oversized => ReaderDefect::OversizedManifest,
-        ManifestDefect::UnsupportedEncoding => ReaderDefect::MalformedManifest,
-        ManifestDefect::WrongOperation => ReaderDefect::MalformedManifest,
     };
     defect(label, error.to_string())
 }
@@ -257,12 +255,13 @@ pub fn read_derived_checkpoint(
             ));
         }
         if let Some(entry) = inventory.get(chunk.path.as_str()) {
-            if entry.blob_sha != blob.blob_sha
-                || entry.size.is_some_and(|size| size != blob.size)
-            {
+            if entry.blob_sha != blob.blob_sha || entry.size.is_some_and(|size| size != blob.size) {
                 return Err(defect(
                     ReaderDefect::InventoryMismatch,
-                    format!("chunk {} blob disagrees with the head inventory", chunk.slot),
+                    format!(
+                        "chunk {} blob disagrees with the head inventory",
+                        chunk.slot
+                    ),
                 ));
             }
         }

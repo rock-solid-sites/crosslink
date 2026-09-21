@@ -112,7 +112,10 @@ pub fn read_marker(dir: &Path) -> Result<DerivedProjectionMarker, StateBrokerErr
         ))
     })?;
     let marker: DerivedProjectionMarker = serde_json::from_str(&raw).map_err(|e| {
-        StateBrokerError::local_io(format!("projection marker {} is malformed: {e}", path.display()))
+        StateBrokerError::local_io(format!(
+            "projection marker {} is malformed: {e}",
+            path.display()
+        ))
     })?;
     if marker.schema != PROJECTION_SCHEMA {
         return Err(StateBrokerError::local_io(format!(
@@ -231,7 +234,8 @@ pub fn verify_derived_projection(
             marker.state_ref
         )));
     }
-    if let (Some(marked), Some(current)) = (marker.backend_host.as_deref(), transport.backend_host())
+    if let (Some(marked), Some(current)) =
+        (marker.backend_host.as_deref(), transport.backend_host())
     {
         if marked != current {
             return Err(StateBrokerError::identity_mismatch(format!(
@@ -284,7 +288,10 @@ pub fn verify_derived_projection(
     // Verify the projected file.
     let target = dir.join(PROJECTED_STATE_PATH);
     let projected = std::fs::read(&target).map_err(|e| {
-        StateBrokerError::local_io(format!("projected state {} is unreadable: {e}", target.display()))
+        StateBrokerError::local_io(format!(
+            "projected state {} is unreadable: {e}",
+            target.display()
+        ))
     })?;
     if projected.len() as u64 != marker.bytes
         || crate::state_broker::digest::sha256_hex(&projected) != marker.state_sha256
@@ -303,9 +310,7 @@ pub fn verify_derived_projection(
             )));
         }
         let anchor = anchor.ok_or_else(|| {
-            StateBrokerError::local_io(
-                "journal anchoring was required but no anchor was supplied",
-            )
+            StateBrokerError::local_io("journal anchoring was required but no anchor was supplied")
         })?;
         anchor
             .verify_anchor(&manifest.source, &projected)
@@ -320,8 +325,9 @@ mod tests {
 
     #[test]
     fn marker_file_is_not_a_broker_path() {
-        assert!(crate::state_broker::validate::validate_logical_path(PROJECTION_MARKER_FILE)
-            .is_err());
+        assert!(
+            crate::state_broker::validate::validate_logical_path(PROJECTION_MARKER_FILE).is_err()
+        );
         assert_eq!(PROJECTED_STATE_PATH, "checkpoint/state.json");
     }
 }

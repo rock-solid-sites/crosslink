@@ -54,7 +54,7 @@ pub struct ChunkEntry {
     pub slot: u32,
     /// Always `checkpoint/chunks/<slot:04>`.
     pub path: String,
-    /// Compressed bytes in this slot (1..=slot_bytes).
+    /// Compressed bytes in this slot (`1..=slot_bytes`).
     pub size: u64,
     /// SHA-256 of this slot's bytes.
     pub sha256: String,
@@ -308,7 +308,10 @@ impl CheckpointManifestV1 {
         if self.source.state_bytes > MAX_STATE_BYTES {
             return Err(ManifestError::new(
                 ManifestDefect::Oversized,
-                format!("state_bytes {} over the safety cap", self.source.state_bytes),
+                format!(
+                    "state_bytes {} over the safety cap",
+                    self.source.state_bytes
+                ),
             ));
         }
         if self.encoding.state_format != super::STATE_FORMAT {
@@ -463,8 +466,7 @@ mod tests {
         CheckpointManifestV1 {
             schema: super::super::MANIFEST_SCHEMA.to_string(),
             project_uuid: "7f3c2a1e-9b4d-4c6a-8e2f-1d5b7a9c0e3f".to_string(),
-            state_ref: "refs/heads/projects/7f3c2a1e-9b4d-4c6a-8e2f-1d5b7a9c0e3f/state"
-                .to_string(),
+            state_ref: "refs/heads/projects/7f3c2a1e-9b4d-4c6a-8e2f-1d5b7a9c0e3f/state".to_string(),
             publisher_id: "test-publisher".to_string(),
             op_id: "ckpt-a1b2c3d4e5f6-0123456789abcdef".to_string(),
             source: SourceCheckpoint {
@@ -495,10 +497,7 @@ mod tests {
         }
     }
 
-    pub(crate) fn ctx<'a>(
-        uuid: &'a str,
-        state_ref: &'a str,
-    ) -> ManifestContext<'a> {
+    pub(crate) fn ctx<'a>(uuid: &'a str, state_ref: &'a str) -> ManifestContext<'a> {
         ManifestContext {
             project_uuid: uuid,
             state_ref,
@@ -569,7 +568,10 @@ mod tests {
         assert!(wrong_digest.validate(&ctx).is_ok());
         let right_length = vec![0u8; wrong_digest.payload_bytes as usize];
         assert_eq!(
-            wrong_digest.validate_payload(&right_length).unwrap_err().defect,
+            wrong_digest
+                .validate_payload(&right_length)
+                .unwrap_err()
+                .defect,
             ManifestDefect::Corruption
         );
         assert_eq!(

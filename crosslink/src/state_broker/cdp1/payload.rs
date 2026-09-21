@@ -22,9 +22,9 @@ pub fn gzip_encode(state_bytes: &[u8]) -> Result<Vec<u8>, StateBrokerError> {
         .mtime(0)
         .operating_system(255)
         .write(Vec::new(), Compression::new(super::COMPRESSION_LEVEL));
-    encoder.write_all(state_bytes).map_err(|e| {
-        StateBrokerError::local_io(format!("gzip compression failed: {e}"))
-    })?;
+    encoder
+        .write_all(state_bytes)
+        .map_err(|e| StateBrokerError::local_io(format!("gzip compression failed: {e}")))?;
     encoder
         .finish()
         .map_err(|e| StateBrokerError::local_io(format!("gzip finalization failed: {e}")))
@@ -47,9 +47,9 @@ pub fn gzip_decode_bounded(
     let mut out = Vec::new();
     let mut buffer = [0u8; 16 * 1024];
     loop {
-        let read = decoder.read(&mut buffer).map_err(|e| {
-            StateBrokerError::protocol(format!("gzip stream is invalid: {e}"))
-        })?;
+        let read = decoder
+            .read(&mut buffer)
+            .map_err(|e| StateBrokerError::protocol(format!("gzip stream is invalid: {e}")))?;
         if read == 0 {
             break;
         }
@@ -157,7 +157,8 @@ mod tests {
         // One byte over four full slots needs five slots and is refused. (The
         // commit-budget cap is enforced by `check_capacity`, not by the
         // splitter: `max_payload_bytes` is smaller than four full slots.)
-        let over_slots = vec![2u8; model.slot_bytes() as usize * super::super::MAX_SLOTS as usize + 1];
+        let over_slots =
+            vec![2u8; model.slot_bytes() as usize * super::super::MAX_SLOTS as usize + 1];
         assert!(split_payload(&over_slots, model).is_err());
     }
 
@@ -170,6 +171,9 @@ mod tests {
         assert_eq!(chunks[0].len(), slot);
         assert_eq!(chunks[1].len(), slot);
         assert_eq!(chunks[2].len(), 5);
-        assert_eq!(sha256_hex(&join_payload(&chunks)), sha256_hex(&vec![3u8; slot * 2 + 5]));
+        assert_eq!(
+            sha256_hex(&join_payload(&chunks)),
+            sha256_hex(&vec![3u8; slot * 2 + 5])
+        );
     }
 }

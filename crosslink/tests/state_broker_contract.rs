@@ -1836,7 +1836,8 @@ impl Cdp1Source {
         let state = CheckpointState {
             next_display_id: 42,
             watermark: Some(OrderingKey {
-                timestamp: DateTime::<Utc>::UNIX_EPOCH + chrono::Duration::seconds(agent_seq as i64),
+                timestamp: DateTime::<Utc>::UNIX_EPOCH
+                    + chrono::Duration::seconds(agent_seq as i64),
                 agent_id: "driver".to_string(),
                 agent_seq,
             }),
@@ -1861,8 +1862,10 @@ impl Cdp1Source {
 impl crosslink::state_broker::cdp1::CheckpointSource for Cdp1Source {
     fn resolve_pushed_checkpoint(
         &self,
-    ) -> Result<crosslink::state_broker::cdp1::PushedCheckpoint, crosslink::state_broker::StateBrokerError>
-    {
+    ) -> Result<
+        crosslink::state_broker::cdp1::PushedCheckpoint,
+        crosslink::state_broker::StateBrokerError,
+    > {
         Ok(self.checkpoint.clone())
     }
 }
@@ -1873,9 +1876,7 @@ impl crosslink::state_broker::cdp1::JournalAnchor for Cdp1Source {
         source: &crosslink::state_broker::cdp1::SourceCheckpoint,
         state_bytes: &[u8],
     ) -> Result<(), crosslink::state_broker::StateBrokerError> {
-        if source.commit != self.checkpoint.commit
-            || state_bytes != self.checkpoint.state_bytes
-        {
+        if source.commit != self.checkpoint.commit || state_bytes != self.checkpoint.state_bytes {
             return Err(crosslink::state_broker::StateBrokerError::protocol(
                 "loopback anchor mismatch",
             ));
@@ -1922,7 +1923,11 @@ fn cdp1_publish_and_read_back_over_loopback_http() {
     let state = client.read_state().unwrap();
     let head = state.state.head.as_ref().unwrap();
     assert_eq!(head.commit, commit);
-    assert!(head.message.contains("Broker-Op: ckpt-"), "{}", head.message);
+    assert!(
+        head.message.contains("Broker-Op: ckpt-"),
+        "{}",
+        head.message
+    );
 
     // Journal-anchored read-back reconstructs the exact state bytes.
     let read = read_derived_checkpoint(
@@ -2017,8 +2022,15 @@ fn cdp1_stale_state_over_loopback_http_does_not_clobber() {
     let identity = PublisherIdentity::writer(UUID);
     // Land an older publish.
     assert!(matches!(
-        publish_checkpoint(&client, &first, &cdp1_config(), &identity, &PublishOptions::default(), None)
-            .unwrap(),
+        publish_checkpoint(
+            &client,
+            &first,
+            &cdp1_config(),
+            &identity,
+            &PublishOptions::default(),
+            None
+        )
+        .unwrap(),
         PublishOutcome::Landed { .. }
     ));
     let commits = stub.lock().counter;
@@ -2037,7 +2049,8 @@ fn cdp1_stale_state_over_loopback_http_does_not_clobber() {
     // Either it reconciles to NotLanded and retries to a landing, or it stays
     // fail-closed; it must never overwrite with an unverified write.
     match outcome {
-        PublishOutcome::Landed { .. } | PublishOutcome::NotLanded { .. }
+        PublishOutcome::Landed { .. }
+        | PublishOutcome::NotLanded { .. }
         | PublishOutcome::ReconcileRequired { .. } => {}
         other => panic!("unexpected outcome {other:?}"),
     }
@@ -2050,10 +2063,7 @@ fn cdp1_oversized_manifest_is_refused_at_loopback() {
     let stub = StubBroker::start();
     let source = Cdp1Source::new(6);
     stub.seed([
-        (
-            "checkpoint/manifest.json".to_string(),
-            vec![b' '; 4_097],
-        ),
+        ("checkpoint/manifest.json".to_string(), vec![b' '; 4_097]),
         (
             "checkpoint/chunks/0000".to_string(),
             source.checkpoint.state_bytes.clone(),

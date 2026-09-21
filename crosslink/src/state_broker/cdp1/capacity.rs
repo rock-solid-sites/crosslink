@@ -163,7 +163,9 @@ pub fn check_capacity(
         });
     }
     if chunks.len() > MAX_SLOTS as usize {
-        return Err(CapacityError::TooManySlots { slots: chunks.len() });
+        return Err(CapacityError::TooManySlots {
+            slots: chunks.len(),
+        });
     }
     let files = 1 + chunks.len();
     if files > MAX_FILES_PER_COMMIT {

@@ -7814,7 +7814,10 @@
       "parent_uuid": "b204e835-0918-4acb-b476-ee3c3c0dcd04",
       "created_by": "driver",
       "created_at": "2026-09-21T14:54:47.339544979Z",
-      "updated_at": "2026-09-21T14:54:47.339544979Z"
+      "updated_at": "2026-09-21T14:54:54.298676555Z",
+      "labels": [
+        "state-broker"
+      ]
     },
     "496f1935-c624-458f-a380-e93bc7da6a07": {
       "uuid": "496f1935-c624-458f-a380-e93bc7da6a07",
@@ -25961,11 +25964,16 @@
       "agent_id": "driver",
       "agent_seq": 77,
       "timestamp": "2026-09-21T14:54:47.339544979Z"
+    },
+    {
+      "agent_id": "driver",
+      "agent_seq": 78,
+      "timestamp": "2026-09-21T14:54:54.298676555Z"
     }
   ],
   "watermark": {
-    "timestamp": "2026-09-21T14:54:47.339544979Z",
+    "timestamp": "2026-09-21T14:54:54.298676555Z",
     "agent_id": "driver",
-    "agent_seq": 77
+    "agent_seq": 78
   }
 }

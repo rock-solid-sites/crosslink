@@ -1,5 +1,5 @@
 {
-  "next_display_id": 804,
+  "next_display_id": 805,
   "next_comment_id": 1181,
   "display_id_map": {
     "00a365a3-7b31-465a-aced-4f1e39c68f8b": 118,
@@ -233,6 +233,7 @@
     "4887a521-615e-44e0-837f-f43eaab219b3": 397,
     "48b0d09d-46ae-45a2-a1be-bca1fbaa92d1": 233,
     "48c5853b-9ea8-4c95-8326-e7253b111d53": 305,
+    "492f7997-e1c8-46a9-b9b2-c7af4b0fbe73": 804,
     "496f1935-c624-458f-a380-e93bc7da6a07": 635,
     "49858567-9fab-4d1b-a691-03331133e22c": 470,
     "49887f60-19c7-44c1-93b0-9e22ea089142": 79,
@@ -7802,6 +7803,18 @@
           "signature": "U1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAgoAVSoPNZVKcrMVLDFcYmdht4ApGHpHxrnyaIXR6QJBMAAAARY3Jvc3NsaW5rLWNvbW1lbnQAAAAAAAAABnNoYTUxMgAAAFMAAAALc3NoLWVkMjU1MTkAAABAJuUox+lHn9Z31QgyFDMUeLClx8g69LapoYnnmE6jBvqqdVN0vjTZe/yonnNH3QmrLcd+8c9WiZyrV83L6FEDDA=="
         }
       }
+    },
+    "492f7997-e1c8-46a9-b9b2-c7af4b0fbe73": {
+      "uuid": "492f7997-e1c8-46a9-b9b2-c7af4b0fbe73",
+      "display_id": 804,
+      "title": "Implement CDP-1 derived-checkpoint publish path (ADR-802 C-now)",
+      "description": "Bounded implementation issue for the first permitted ADR-802 C-now derived publish path (CDP-1).\n\nFROZEN SPEC (authoritative):\n- .design/state-broker-derived-publish.md @ 7e3f71f94 (branch design/pp3g-802-derived-publish)\n- Clean-room synthesis + three raw reviews: handoffs/review-cdp1/ (99-synthesis.md, 01-hy3.md, 02-qwen3.8-flash.md, 03-glm-5.3-flash.md)\n\nSCOPE — implement the CDP-1 publish path only:\n1. Derived-publish module: canonical source selection (exact pushed checkpoint blob, no re-reduction), deterministic gzip, fixed-slot chunking, canonical manifest, capacity fail-closed checks.\n2. Publisher-specific CAS/reconcile (must NOT call generic commit_cas): head classification per §5.3, watermark + semantic-identity (watermark, state_sha256) rules, lost-response/502 reconciliation, outcome taxonomy (Landed / LandedSuperseded / AlreadyCurrent / NotLanded / Refused / ReconcileRequired / Diverged / FailedClosed).\n3. Reader + projection: pinned-commit reads, inventory/blob cross-checks, digest ladder, provenance (JournalAnchored/Advisory), v2 projection marker, authoritative-hydration gate.\n4. Local write-ahead attempt record + crash recovery by op_id.\n5. CLI: `crosslink state-broker publish-checkpoint` with `--dry-run` (zero writes) and `--verify-full`.\n6. Tests T01–T55 per spec §10 (unit, mock-broker, loopback HTTP). Live L1/L2 are NOT part of this issue's CI.\n\nHARD PREREQUISITES (spec §12; must hold before any write path is enabled):\n- ADR-802 §17 items: validate_message panic fix, reconcile-required class, op-id-seen/content-differs hard outcome, mandatory projection marker, §5 rebase proof, inventory/blob cross-checks, per-read identity binding, journal high-water-mark check at append.\n- Repo↔project-UUID binding implemented and enforced in code (§12 item 9; ADR §16 — a waiver is not sufficient).\n- Compression dependency pinned (flate2/miniz_oxide or equivalent) with the §2.3 header requirements and a determinism test.\n- COMMIT_BUDGET_ACCOUNTING resolved by the deployed broker source or a reviewed live boundary probe (L2) on a synthetic project; no near-boundary publish before then.\n- Historical-commit reads (blob/verify at non-head commits) confirmed on the deployed broker via a read-only probe, or the LandedSuperseded→NotLanded degradation explicitly accepted.\n\nNON-GOALS (out of scope for this issue):\n- No SyncManager wiring (ADR-802 §16).\n- No inbox implementation.\n- No broker delete; no browse-tree mirroring.\n- No prune interaction; the broker publish is never a prune gate.\n- No live broker write without separate per-write operator approval; no ADR change.\n\nACCEPTANCE:\n- Unit + mock-broker + loopback suites green; `--dry-run` performs zero broker calls; no test performs a live write.\n- Every §12 prerequisite closed, or explicitly deferred with an operator decision recorded on this issue.\n- Independent review of the implementation before the single reviewed live write (L1).",
+      "status": "open",
+      "priority": "high",
+      "parent_uuid": "b204e835-0918-4acb-b476-ee3c3c0dcd04",
+      "created_by": "driver",
+      "created_at": "2026-09-21T14:54:47.339544979Z",
+      "updated_at": "2026-09-21T14:54:47.339544979Z"
     },
     "496f1935-c624-458f-a380-e93bc7da6a07": {
       "uuid": "496f1935-c624-458f-a380-e93bc7da6a07",
@@ -25943,11 +25956,16 @@
       "agent_id": "driver",
       "agent_seq": 76,
       "timestamp": "2026-09-21T04:40:12.611359099Z"
+    },
+    {
+      "agent_id": "driver",
+      "agent_seq": 77,
+      "timestamp": "2026-09-21T14:54:47.339544979Z"
     }
   ],
   "watermark": {
-    "timestamp": "2026-09-21T04:40:12.611359099Z",
+    "timestamp": "2026-09-21T14:54:47.339544979Z",
     "agent_id": "driver",
-    "agent_seq": 76
+    "agent_seq": 77
   }
 }

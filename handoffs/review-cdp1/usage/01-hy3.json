@@ -1,0 +1,31 @@
+{
+  "expected_model": "opencode-go/hy3",
+  "session_id": "ses_f3bb1346effeWNwiWEFQ4WeyMc",
+  "steps": 14,
+  "tokens": {
+    "input": 164142,
+    "output": 3216,
+    "reasoning": 23613,
+    "cache_read": 693568,
+    "cache_write": 0
+  },
+  "cost_usd": 0.0491,
+  "finish_reasons": [
+    "tool-calls",
+    "tool-calls",
+    "tool-calls",
+    "tool-calls",
+    "tool-calls",
+    "tool-calls",
+    "tool-calls",
+    "tool-calls",
+    "tool-calls",
+    "tool-calls",
+    "tool-calls",
+    "tool-calls",
+    "tool-calls",
+    "stop"
+  ],
+  "extraction": "text parts",
+  "report_chars": 8694
+}

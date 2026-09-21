@@ -463,16 +463,28 @@ fn read_token_file(path: &str) -> Result<String, StateBrokerError> {
 
 /// Read the optional `state_backend` key from `.crosslink/hook-config.json`.
 ///
-/// A missing file or key yields `None` (Local). A non-string value is a
+/// A **missing** file or key yields `None` (Local). A non-string value is a
 /// configuration error. An unparsable file is a hard configuration error when
 /// the raw text mentions the selection key — the file may have selected the
 /// broker and falling back to Local would silently route durable state to the
 /// wrong backend. When the raw text does not mention the key, the file cannot
 /// have selected a backend, so the adapter warns and yields `None`.
+///
+/// An **existing but unreadable** file (permissions, I/O error, invalid UTF-8,
+/// or a directory at that path) is always a hard configuration error: the file
+/// could contain a broker selection and must never silently degrade to Local.
 fn read_hook_config_backend(crosslink_dir: &Path) -> Result<Option<String>, StateBrokerError> {
     let path = crosslink_dir.join("hook-config.json");
-    let Ok(raw) = std::fs::read_to_string(&path) else {
-        return Ok(None);
+    let raw = match std::fs::read_to_string(&path) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(configuration_error(format!(
+                "cannot read {} ({error}); refusing to fall back to Local because the file \
+                 may select {HOOK_CONFIG_KEY}",
+                path.display()
+            )));
+        }
     };
     let value = match serde_json::from_str::<Value>(&raw) {
         Ok(value) => value,
@@ -754,6 +766,64 @@ mod tests {
         let error = StateBackend::resolve_with(dir.path(), lookup_from(&[])).unwrap_err();
         assert_eq!(error.code(), BrokerErrorCode::Configuration);
         assert!(error.message().contains(HOOK_CONFIG_KEY));
+    }
+
+    /// A missing file means "no selection" and stays Local.
+    #[test]
+    fn missing_hook_config_stays_local() {
+        let dir = tempfile::tempdir().unwrap();
+        let backend = StateBackend::resolve_with(dir.path(), lookup_from(&[])).unwrap();
+        assert_eq!(backend.label(), "local");
+    }
+
+    /// An existing file that cannot be decoded could have selected the broker:
+    /// it must fail hard, never silently become Local.
+    #[test]
+    fn non_utf8_hook_config_is_a_hard_error() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("hook-config.json"),
+            [0xff, 0xfe, 0x00, 0x80, b'{'],
+        )
+        .unwrap();
+        let error = StateBackend::resolve_with(dir.path(), lookup_from(&[])).unwrap_err();
+        assert_eq!(error.code(), BrokerErrorCode::Configuration);
+        assert!(
+            error.message().contains("refusing"),
+            "error must say it refuses to fall back: {}",
+            error.message()
+        );
+    }
+
+    #[test]
+    fn directory_hook_config_is_a_hard_error() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("hook-config.json")).unwrap();
+        let error = StateBackend::resolve_with(dir.path(), lookup_from(&[])).unwrap_err();
+        assert_eq!(error.code(), BrokerErrorCode::Configuration);
+    }
+
+    /// Permission-denied is the same class as invalid UTF-8: an existing config
+    /// that cannot be read must not degrade to Local. Skipped when the process
+    /// can read the file regardless of mode (e.g. running as root).
+    #[cfg(unix)]
+    #[test]
+    fn unreadable_hook_config_is_a_hard_error() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("hook-config.json");
+        std::fs::write(&path, format!("{{\"{HOOK_CONFIG_KEY}\": \"broker\"}}")).unwrap();
+        let mut permissions = std::fs::metadata(&path).unwrap().permissions();
+        permissions.set_mode(0o000);
+        std::fs::set_permissions(&path, permissions).unwrap();
+        if std::fs::read_to_string(&path).is_ok() {
+            // Privileges ignore file modes here; the unreadable path cannot be
+            // exercised in this environment.
+            return;
+        }
+        let error = StateBackend::resolve_with(dir.path(), lookup_from(&[])).unwrap_err();
+        assert_eq!(error.code(), BrokerErrorCode::Configuration);
     }
 
     #[test]

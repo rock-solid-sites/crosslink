@@ -626,8 +626,10 @@ impl StateBrokerClient {
     ///
     /// A write that fails *after* the request was sent can have landed anyway.
     /// Every such failure (transport timeout/reset, unparseable response,
-    /// upstream 502, internal 500, or a success envelope with
-    /// `verified: false`) is surfaced as
+    /// upstream 502, internal 500, a success envelope with
+    /// `verified: false`, or a success envelope that does not carry a verified
+    /// read-back for every submitted path —
+    /// `details.reason = "incomplete_readback"`) is surfaced as
     /// [`BrokerErrorCode::ReconcileRequired`] with
     /// `details.reason`, the intended `op_id`, and any known commit/paths —
     /// never as an ordinary error or success. Reconcile by op id before
@@ -671,16 +673,32 @@ impl StateBrokerClient {
             Ok(outcome) => outcome,
             Err(error) => return Err(self.classify_commit_failure(request, error)),
         };
-        // A success must be content-verified both overall and per file: a
-        // transport that disagrees with itself is not an ordinary success.
-        let has_unverified_files = outcome.files.iter().any(|file| !file.verified);
-        if !outcome.verified || has_unverified_files {
+        // A success must be content-verified for every submitted path: the
+        // response must carry exactly one verified entry per requested path,
+        // with no missing, extra, duplicate, or mismatched paths. A transport
+        // that disagrees with itself is not an ordinary success.
+        let failed_paths = unverified_response_paths(request, &outcome);
+        if !outcome.verified || !failed_paths.is_empty() {
+            let has_unverified_files = outcome.files.iter().any(|file| !file.verified);
+            let (reason, message) = if !outcome.verified || has_unverified_files {
+                (
+                    "verified_false",
+                    "broker reported an unverified write; the write may have landed partially — \
+                     reconcile by op id before retrying",
+                )
+            } else {
+                (
+                    "incomplete_readback",
+                    "broker reported success without a verified read-back for every submitted \
+                     path; the write may have landed partially — reconcile by op id before retrying",
+                )
+            };
             return Err(reconcile_required_for_outcome(
                 request,
                 &outcome,
-                "verified_false",
-                "broker reported an unverified write; the write may have landed partially — \
-                 reconcile by op id before retrying",
+                reason,
+                message,
+                failed_paths,
             ));
         }
         Ok(outcome)
@@ -865,20 +883,15 @@ impl StateBrokerClient {
     }
 }
 
-/// Build a `reconcile_required` error from a received but unverified success
-/// outcome.
+/// Build a `reconcile_required` error from a received but unverified or
+/// incomplete success outcome.
 fn reconcile_required_for_outcome(
     request: &CommitRequest,
     outcome: &CommitOutcome,
     reason: &str,
     message: &str,
+    failed_paths: Vec<String>,
 ) -> StateBrokerError {
-    let failed_paths: Vec<Value> = outcome
-        .files
-        .iter()
-        .filter(|file| !file.verified)
-        .map(|file| Value::String(file.path.clone()))
-        .collect();
     let mut details = serde_json::Map::new();
     details.insert("reason".to_string(), Value::String(reason.to_string()));
     details.insert("commit".to_string(), Value::String(outcome.commit.clone()));
@@ -886,9 +899,48 @@ fn reconcile_required_for_outcome(
         details.insert("op_id".to_string(), Value::String(op_id.clone()));
     }
     if !failed_paths.is_empty() {
-        details.insert("failed_paths".to_string(), Value::Array(failed_paths));
+        details.insert(
+            "failed_paths".to_string(),
+            Value::Array(failed_paths.into_iter().map(Value::String).collect()),
+        );
     }
     StateBrokerError::reconcile_required(message.to_string(), Some(Value::Object(details)))
+}
+
+/// Whether `outcome` carries exactly one verified read-back entry for every
+/// path in `request`, with no missing, extra, duplicate, or mismatched paths.
+pub(crate) fn outcome_verifies_every_requested_path(
+    request: &CommitRequest,
+    outcome: &CommitOutcome,
+) -> bool {
+    unverified_response_paths(request, outcome).is_empty()
+}
+
+/// Paths whose read-back result is missing, unverified, duplicated, or not part
+/// of the request (sorted and deduplicated).
+pub(crate) fn unverified_response_paths(
+    request: &CommitRequest,
+    outcome: &CommitOutcome,
+) -> Vec<String> {
+    let mut failed = Vec::new();
+    let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    for file in &outcome.files {
+        let requested = request
+            .files
+            .iter()
+            .any(|candidate| candidate.path == file.path);
+        if !requested || !file.verified || !seen.insert(file.path.as_str()) {
+            failed.push(file.path.clone());
+        }
+    }
+    for file in &request.files {
+        if !seen.contains(file.path.as_str()) {
+            failed.push(file.path.clone());
+        }
+    }
+    failed.sort();
+    failed.dedup();
+    failed
 }
 
 /// Host-only label for an error message (never the full URL).

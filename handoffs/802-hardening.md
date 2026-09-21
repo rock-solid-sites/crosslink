@@ -115,8 +115,7 @@ mismatch, `upstream_error`-on-write classification, and the
 
 ## 6. Test results
 
-Final run (code tree of commit `6a92d6942`, identical to the rebased tip's
-`crosslink/` tree):
+### 6.1 Initial hardening run (commit `6a92d6942`, code identical to the rebased tip)
 
 | Command | Result |
 |---|---|
@@ -129,6 +128,26 @@ Final run (code tree of commit `6a92d6942`, identical to the rebased tip's
 | `cargo test --test state_broker_live` | 0 run, 1 ignored (live probe; requires operator env) |
 | `cargo clippy --lib --bins --tests` | no warnings from `state_broker` except the pre-existing `needless_pass_by_value` on the command dispatcher (same pattern as other command modules) |
 | `rustfmt --edition 2021 --check` on touched files | clean |
+
+### 6.2 Focused-review correction pass
+
+A focused regression/security review of the hardening delta raised four
+correction items plus two end-to-end test gaps. Disposition:
+
+| Item | Finding | Correction |
+|---|---|---|
+| F1 | "Unchanged" could be proven from `sha256 == None` on both sides plus equal sizes | `prove_non_overlap` now requires matching SHA-256 values on both sides; digest-less present paths are `OverlapUnprovable`. Regression test uses a digest-stripping transport and same-length different content. |
+| F2 | An existing-but-unreadable `hook-config.json` silently became Local | Only `NotFound` means "no selection"; permission/I/O/invalid-UTF-8/directory-at-path are hard `Configuration` errors. Tests for invalid UTF-8, directory, permission-denied (skipped when privileges ignore modes), and missing-file-stays-Local. |
+| F3 | `verified: true` with an empty/partial/extra/duplicate `files` array was accepted | A success must carry exactly one verified entry per submitted path; violations are `reconcile_required` with `details.reason = "incomplete_readback"` (per-file/overall `verified: false` keeps `"verified_false"`). Enforced in `client.commit` and again in `commit_cas`. Contract tests cover empty, subset, extra, and duplicate responses (stub tamper modes). |
+| F4 | Divergence was a non-success *value*; a caller matching only `Ok` could misread it | `CasResolution` is `#[must_use]` with an explicit "`Ok` is not success" contract, and `require_success()` converts every non-success verdict into a typed, non-retryable `reconcile_required` error (`op_id_reused_with_different_content` preserved in `details.reason`). Tests cover divergence and both verified-success shapes. |
+
+End-to-end tests added: `hydrate_into` rejects an inventory/blob mismatch on the
+real call path (tampering transport), and `verify_projection` rejects a tampered
+projected file (digest check wired into the gate).
+
+Updated counts after the correction pass: `state_broker` lib 80, bin 81,
+contract 16. Full-suite results for the corrected tree are recorded in the
+correction-pass commit message / final report.
 
 The full bin suite was run with `--skip proptest --skip agents_hygiene`,
 matching the branch's documented practice (proptest runs in a dedicated job;

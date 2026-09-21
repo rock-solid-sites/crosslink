@@ -9,7 +9,7 @@ use chrono::Utc;
 use serde_json::json;
 use uuid::Uuid;
 
-use super::client::CommitRequest;
+use super::client::{CommitOutcome, CommitRequest, ProjectState, StateBlob, VerifiedEntry};
 use super::config::{default_projection_dir, StateBrokerConfig};
 use super::error::{BrokerErrorCode, StateBrokerError};
 use super::mock::MockStateTransport;
@@ -229,6 +229,79 @@ fn rehydration_removes_files_outside_the_new_selection() {
     assert!(!dir.path().join("checkpoints/first.json").exists());
     let marker = mock.verify_projection(dir.path()).unwrap();
     assert_eq!(marker.files.len(), 1);
+}
+
+/// The inventory↔blob cross-check must run on the actual hydration path, not
+/// only in a helper test: a transport whose blob disagrees with the listed
+/// inventory entry is rejected before anything is written.
+#[test]
+fn hydrate_into_rejects_an_inventory_blob_mismatch() {
+    /// Reports an inventory whose `blob_sha` cannot match the blob it serves.
+    struct MismatchedInventory {
+        inner: MockStateTransport,
+    }
+
+    impl ProjectStateTransport for MismatchedInventory {
+        fn read_state(&self) -> Result<ProjectState, StateBrokerError> {
+            let mut state = self.inner.read_state()?;
+            for entry in &mut state.state.entries {
+                entry.blob_sha = "f".repeat(40);
+            }
+            Ok(state)
+        }
+
+        fn read_blob(&self, path: &str, at: Option<&str>) -> Result<StateBlob, StateBrokerError> {
+            self.inner.read_blob(path, at)
+        }
+
+        fn verify(
+            &self,
+            commit: &str,
+            paths: &[String],
+        ) -> Result<Vec<VerifiedEntry>, StateBrokerError> {
+            self.inner.verify(commit, paths)
+        }
+
+        fn commit(&self, request: &CommitRequest) -> Result<CommitOutcome, StateBrokerError> {
+            self.inner.commit(request)
+        }
+    }
+
+    let transport = MismatchedInventory {
+        inner: bootstrap_mock(),
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let error = transport.hydrate_into(dir.path(), None).unwrap_err();
+    assert_eq!(error.code(), BrokerErrorCode::Protocol);
+    assert!(
+        error.message().contains("blob sha mismatch"),
+        "{}",
+        error.message()
+    );
+    // The mismatch is detected before the first file is written.
+    assert!(!dir.path().join("checkpoints/first.json").exists());
+    assert!(!dir.path().join("meta/counters.json").exists());
+}
+
+/// `verify_projection` must reject a projection whose *file* was modified after
+/// hydration (not just a stale head or a corrupt marker): the digest check is
+/// wired into the gate.
+#[test]
+fn verify_projection_rejects_a_tampered_file() {
+    let mock = bootstrap_mock();
+    let dir = tempfile::tempdir().unwrap();
+    mock.hydrate_into(dir.path(), None).unwrap();
+    mock.verify_projection(dir.path())
+        .expect("fresh projection");
+
+    std::fs::write(dir.path().join("checkpoints/first.json"), br#"{"no":true}"#).unwrap();
+    let error = mock.verify_projection(dir.path()).unwrap_err();
+    assert_eq!(error.code(), BrokerErrorCode::LocalIo);
+    assert!(
+        error.message().contains("marker digest"),
+        "{}",
+        error.message()
+    );
 }
 
 // ── CAS reconciliation ───────────────────────────────────────────────
@@ -605,6 +678,162 @@ fn commit_cas_reports_a_head_that_moves_during_reconciliation() {
         ReconcileReason::HeadMovedDuringReconcile => {}
         other => panic!("expected HeadMovedDuringReconcile, got {other:?}"),
     }
+}
+
+/// The non-overlap proof must not treat two digest-less read-backs as
+/// "unchanged" merely because the sizes match: without content evidence the
+/// rebase is refused and the competing bytes survive.
+#[test]
+fn commit_cas_refuses_a_rebase_without_digest_evidence() {
+    /// Hides the `sha256` digests the mock provides, so `verify` reports
+    /// present paths with no content evidence (only `blob_sha`/`size`).
+    struct DigestlessVerify {
+        inner: MockStateTransport,
+    }
+
+    impl ProjectStateTransport for DigestlessVerify {
+        fn read_state(&self) -> Result<ProjectState, StateBrokerError> {
+            self.inner.read_state()
+        }
+
+        fn read_blob(&self, path: &str, at: Option<&str>) -> Result<StateBlob, StateBrokerError> {
+            self.inner.read_blob(path, at)
+        }
+
+        fn verify(
+            &self,
+            commit: &str,
+            paths: &[String],
+        ) -> Result<Vec<VerifiedEntry>, StateBrokerError> {
+            Ok(self
+                .inner
+                .verify(commit, paths)?
+                .into_iter()
+                .map(|mut entry| {
+                    entry.sha256 = None;
+                    entry
+                })
+                .collect())
+        }
+
+        fn commit(&self, request: &CommitRequest) -> Result<CommitOutcome, StateBrokerError> {
+            self.inner.commit(request)
+        }
+    }
+
+    let mock = bootstrap_mock();
+    let base_head = mock.head().unwrap();
+    let ours = "checkpoints/first.json";
+    // Same byte length as the base content, different bytes: equal sizes alone
+    // must not prove this path unchanged.
+    assert_eq!(br#"{"ok":true}"#.len(), br#"{"no":true}"#.len());
+    mock.inject_competing_commit(
+        [(ours, br#"{"no":true}"#.to_vec())],
+        "checkpoint: theirs",
+        None,
+    );
+
+    let transport = DigestlessVerify {
+        inner: mock.clone(),
+    };
+    let request = CommitRequest::single(
+        ours,
+        br#"{"ok":true}"#.to_vec(),
+        Some(base_head),
+        "checkpoint: ours",
+        Some("op-ours".to_string()),
+    );
+    let resolution = transport.commit_cas(&request, 1).expect("verdict");
+    assert!(!resolution.is_verified());
+    match expect_reconcile_required(&resolution) {
+        ReconcileReason::OverlapUnprovable { detail } => {
+            assert!(detail.contains("digest"), "{detail}");
+        }
+        other => panic!("expected OverlapUnprovable, got {other:?}"),
+    }
+    assert_eq!(resolution.attempts(), 1, "no write was attempted");
+    assert_eq!(
+        mock.file_bytes(ours).unwrap(),
+        br#"{"no":true}"#,
+        "the competing writer's bytes must survive"
+    );
+}
+
+/// `require_success` is the supported success path: an op-id divergence is a
+/// typed, non-retryable reconcile-required error, never a success.
+#[test]
+fn require_success_rejects_op_id_divergence() {
+    let mock = bootstrap_mock();
+    let base_head = mock.head().unwrap();
+
+    mock.commit(&CommitRequest::single(
+        "checkpoints/ours.json",
+        br#"{"v":1}"#.to_vec(),
+        Some(base_head.clone()),
+        "checkpoint: ours",
+        Some("op-ours".to_string()),
+    ))
+    .expect("direct commit");
+    mock.inject_competing_commit(
+        vec![("checkpoints/ours.json", br#"{"v":2}"#.to_vec())],
+        "reuse",
+        Some("op-ours"),
+    );
+
+    let resolution = mock
+        .commit_cas(
+            &CommitRequest::single(
+                "checkpoints/ours.json",
+                br#"{"v":1}"#.to_vec(),
+                Some(base_head),
+                "checkpoint: ours",
+                Some("op-ours".to_string()),
+            ),
+            1,
+        )
+        .expect("verdict");
+    assert!(!resolution.is_verified());
+    let error = resolution.require_success().unwrap_err();
+    assert!(error.is_reconcile_required(), "{error:?}");
+    assert_eq!(
+        error.reconcile_reason(),
+        Some("op_id_reused_with_different_content")
+    );
+    assert!(!error.retryable(), "divergence is a hard non-success");
+}
+
+/// `require_success` yields the verified facts for both success shapes.
+#[test]
+fn require_success_yields_verified_facts() {
+    let mock = bootstrap_mock();
+    let base_head = mock.head().unwrap();
+
+    let request = CommitRequest::single(
+        "checkpoints/ours.json",
+        br#"{"ours":true}"#.to_vec(),
+        Some(base_head),
+        "checkpoint: ours",
+        Some("op-ours".to_string()),
+    );
+    let applied = mock
+        .commit_cas(&request, 1)
+        .expect("verdict")
+        .require_success()
+        .expect("verified success");
+    assert!(!applied.already_applied);
+    assert_eq!(applied.attempts, 1);
+    assert!(applied.files.iter().all(|file| file.verified));
+    assert_eq!(applied.commit, mock.head().unwrap());
+
+    // A replay resolves to AlreadyApplied, still a verified success.
+    let replay = mock
+        .commit_cas(&request, 1)
+        .expect("verdict")
+        .require_success()
+        .expect("verified replay");
+    assert!(replay.already_applied);
+    assert!(replay.files.iter().all(|file| file.verified));
+    assert_eq!(replay.commit, mock.head().unwrap());
 }
 
 #[test]

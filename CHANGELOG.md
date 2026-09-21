@@ -22,16 +22,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - State broker decision-independent hardening (#802): `commit_cas` refuses
   automatic same-path rebases unless non-overlap (or payload equivalence) is
   proven and returns an explicit `CasResolution` verdict instead of an
-  incoherent success; ambiguous writes (timeout, unparseable response,
-  upstream/read-back mismatch, `verified: false`) are typed
-  `reconcile_required` and never blind-retried; projections carry an
+  incoherent success; the non-overlap proof requires matching SHA-256 content
+  evidence, so a digest-less read-back is refused; ambiguous writes (timeout,
+  unparseable response, upstream/read-back mismatch, `verified: false`, or a
+  read-back that does not verify every submitted path) are typed
+  `reconcile_required` and never blind-retried; `CasResolution::require_success`
+  makes every non-success verdict — including an op-id divergence — a typed
+  non-retryable error for write paths; projections carry an
   identity/head/completeness marker that `verify_projection` checks fail-closed;
   blob reads are cross-checked against the pinned inventory; the broker's
-  project UUID/ref are bound to configuration; a corrupt `hook-config.json`
-  that may select the broker fails hard instead of silently falling back to
-  Local; non-ASCII commit messages no longer panic client validation; and the
-  mock/stub fakes now model commit history and broker limits faithfully. No
-  `SyncManager` wiring and no change to the v3 hub model.
+  project UUID/ref are bound to configuration; a corrupt or unreadable
+  `hook-config.json` that may select the broker fails hard instead of silently
+  falling back to Local; non-ASCII commit messages no longer panic client
+  validation; and the mock/stub fakes now model commit history and broker
+  limits faithfully. No `SyncManager` wiring and no change to the v3 hub model.
 
 - `crosslink migrate hub-v3 --remigrate-from-v2` - regenerates the v3 genesis
   from the current `crosslink/hub` (v2) tip and force-pushes it, superseding a

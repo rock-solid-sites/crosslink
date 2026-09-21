@@ -102,13 +102,26 @@ this shape pre-answers it.
 **Automatic rebase is refused unless non-overlap is proven.** On a conflict the
 retry compares per-path digests at the base and observed heads (`verify` at
 both commits); it re-issues only when every requested path is unchanged, or
-already carries exactly the intended payload. A vanished ref is never
-"rebased" by bootstrapping a fresh history over it.
+already carries exactly the intended payload. "Unchanged" requires **matching
+SHA-256 evidence on both sides**: presence, `blob_sha`, or equal sizes alone are
+not content evidence, and a digest-less read-back is `Unprovable` (refused),
+never `Proven`. A vanished ref is never "rebased" by bootstrapping a fresh
+history over it.
+
+**A success must verify every submitted path.** `commit`/`commit_cas` accept a
+successful response only when it carries exactly one verified read-back entry
+for each requested path — an empty, partial, extra, or duplicated `files` array
+is `reconcile_required` (`details.reason = "incomplete_readback"`), never
+success.
 
 `op_id` is mandatory for `commit_cas`/`reconcile`. Uniqueness is a caller
 obligation: one op id identifies one intended payload for one writer; reuse
-with different content is detected, never accepted. Callers with append-style
-semantics must use `commit()` and reconcile explicitly.
+with different content is detected, never accepted. Write-path callers must
+either match `CasResolution` exhaustively or use
+`CasResolution::require_success()`, which converts every non-success verdict
+(including the `op_id_reused_with_different_content` divergence) into a typed,
+non-retryable `reconcile_required` error. Callers with append-style semantics
+must use `commit()` and reconcile explicitly.
 
 ### 3.2 Local projections are disposable, self-identifying, and freshness-bound
 
@@ -166,7 +179,10 @@ raw text mentions `state_backend`** (the file may have selected the broker and
 falling back to Local would silently route durable state to the wrong store).
 When the raw text does not mention the key, the file cannot have selected a
 backend: the adapter warns and keeps Local, so unrelated config damage does not
-become a hard failure.
+become a hard failure. An **existing but unreadable** config file (permissions,
+I/O error, invalid UTF-8, or a directory at that path) always fails hard: it
+could contain a broker selection, so it must never silently become Local. Only
+a genuinely missing file (`NotFound`) means "no selection".
 
 ### 3.4 Secret handling
 
@@ -351,12 +367,35 @@ disposition and evidence: `handoffs/802-hardening.md`. Summary:
 - unused public surface removed (`BrokerErrorCode::ALL`,
   `StateBackend::into_broker`, `transport_from_env`, `StateBlob::text`).
 
-Hardening evidence (final run): `cargo test --lib state_broker` 71 passed;
-`cargo test --bin crosslink state_broker` 72 passed; full library 1884 passed;
+Hardening evidence (final run): `cargo test --lib state_broker` 80 passed;
+`cargo test --bin crosslink state_broker` 81 passed; full library 1884 passed;
 full bin suite 2944 passed (53 filtered: proptest + the pre-existing
 `agents_hygiene` flake); `cli_integration` 199 passed;
-`state_broker_contract` 15 passed (real HTTP over loopback). The deployed
+`state_broker_contract` 16 passed (real HTTP over loopback). The deployed
 read-only smoke is `handoffs/802-live-smoke.md`.
+
+### 7.3.1 Focused-review correction pass
+
+A focused regression/security review of the hardening delta produced four
+correction items, all closed on the same branch:
+
+- **F1 (digest evidence):** the non-overlap proof now requires matching SHA-256
+  values on both sides for an "unchanged" verdict; digest-less read-backs are
+  `OverlapUnprovable` (regression test with present, digest-less, equal-sized
+  entries).
+- **F2 (unreadable config):** only `NotFound` means "no selection"; permission,
+  I/O, invalid-UTF-8, and directory-at-path conditions are hard `Configuration`
+  errors (tests for each).
+- **F3 (read-back completeness):** a success must carry exactly one verified
+  entry per submitted path; empty, partial, extra, and duplicated `files`
+  arrays are `reconcile_required` (`incomplete_readback`), enforced at both the
+  client and `commit_cas` layers.
+- **F4 (divergence handling):** `CasResolution` is `#[must_use]` and
+  `require_success()` converts every non-success verdict into a typed,
+  non-retryable error; `is_verified()` stays false for divergence.
+
+Plus two end-to-end tests: `hydrate_into` rejects an inventory/blob mismatch on
+the real call path, and `verify_projection` rejects a tampered projected file.
 
 ## 8. Next step: live verification (after the Codex Cloud durability experiment passes)
 

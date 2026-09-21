@@ -18,7 +18,8 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use crosslink::state_broker::{
-    CommitRequest, ProjectStateTransport, StateBlob, StateBrokerClient, StateBrokerConfig,
+    CommitFile, CommitRequest, ProjectStateTransport, StateBlob, StateBrokerClient,
+    StateBrokerConfig,
 };
 
 const UUID: &str = "1d440dcf-bcbf-4d1a-987c-d5334568a716";
@@ -26,6 +27,21 @@ const TOKEN: &str = "stub-broker-token-abcdefghijklmnop";
 const BASELINE: &str = "94fa0e38ae68c95e13d91226e74e6d4f6f1524dd";
 
 // ── Stub broker ──────────────────────────────────────────────────────
+
+/// How the next commit response's `files` array is tampered with (the stub
+/// still applies the commit, modelling a transport that lies about its
+/// read-back).
+#[derive(Debug, Clone, Copy)]
+enum CommitFilesTamper {
+    /// Return an empty `files` array with overall `verified: true`.
+    Empty,
+    /// Omit the last submitted file from the read-back.
+    OmitLast,
+    /// Add a path that was not requested.
+    Extra,
+    /// Report one path twice.
+    Duplicate,
+}
 
 struct StubState {
     project_uuid: String,
@@ -57,6 +73,8 @@ struct StubState {
     /// Return the broker's ref-update-race `stale_state` shape (with
     /// `unattached_commit`) for the next commit.
     stale_unattached_next: bool,
+    /// Tamper with the next commit response's `files` array.
+    commit_files_tamper_next: Option<CommitFilesTamper>,
 }
 
 struct StubBroker {
@@ -87,6 +105,7 @@ impl StubBroker {
             unverified_next: false,
             unverified_files_next: false,
             stale_unattached_next: false,
+            commit_files_tamper_next: None,
         }));
         let stop = Arc::new(AtomicBool::new(false));
         let thread_state = Arc::clone(&state);
@@ -186,6 +205,11 @@ impl StubBroker {
     /// object exists but no ref points to it).
     fn set_stale_unattached_next(&self) {
         self.lock().stale_unattached_next = true;
+    }
+
+    /// Tamper with the next commit response's `files` array.
+    fn set_commit_files_tamper_next(&self, tamper: CommitFilesTamper) {
+        self.lock().commit_files_tamper_next = Some(tamper);
     }
 
     fn head(&self) -> Option<String> {
@@ -678,6 +702,26 @@ fn route(request: &StubRequest, state: &Arc<Mutex<StubState>>) -> (u16, serde_js
             guard.message = Some(full_message.clone());
             let snapshot = guard.files.clone();
             guard.history.insert(commit.clone(), snapshot);
+            // Optionally lie about the read-back (the commit still lands).
+            match guard.commit_files_tamper_next.take() {
+                Some(CommitFilesTamper::Empty) => verified.clear(),
+                Some(CommitFilesTamper::OmitLast) => {
+                    verified.pop();
+                }
+                Some(CommitFilesTamper::Extra) => verified.push(serde_json::json!({
+                    "path": "unrequested.json",
+                    "blob_sha": "f".repeat(40),
+                    "sha256": "f".repeat(64),
+                    "size": 1,
+                    "verified": true,
+                })),
+                Some(CommitFilesTamper::Duplicate) => {
+                    if let Some(last) = verified.last().cloned() {
+                        verified.push(last);
+                    }
+                }
+                None => {}
+            }
             ok(
                 "state.commit",
                 serde_json::json!({
@@ -1425,6 +1469,111 @@ fn per_file_unverified_is_never_an_ordinary_success() {
             .map(Vec::len),
         Some(1)
     );
+}
+
+/// A success envelope must carry a verified read-back for every submitted path:
+/// empty, partial, extra, and duplicated `files` arrays are never success.
+#[test]
+fn commit_response_must_verify_every_submitted_path() {
+    fn failed_paths_of(error: &crosslink::state_broker::StateBrokerError) -> Vec<String> {
+        error
+            .details()
+            .and_then(|details| details.get("failed_paths"))
+            .and_then(|value| value.as_array())
+            .map(|paths| {
+                paths
+                    .iter()
+                    .filter_map(|value| value.as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    let broker = StubBroker::start();
+    broker.seed(vec![("a.json", b"one".to_vec())]);
+    let client = broker.client();
+
+    // Control: a complete read-back is accepted.
+    client
+        .commit(&CommitRequest::single(
+            "b.json",
+            b"two".to_vec(),
+            broker.head(),
+            "control",
+            Some("op-control".to_string()),
+        ))
+        .expect("complete read-back accepted");
+
+    // Empty files array.
+    broker.set_commit_files_tamper_next(CommitFilesTamper::Empty);
+    let error = client
+        .commit(&CommitRequest::single(
+            "c.json",
+            b"c".to_vec(),
+            broker.head(),
+            "empty read-back",
+            Some("op-empty".to_string()),
+        ))
+        .unwrap_err();
+    assert!(error.is_reconcile_required(), "{error:?}");
+    assert_eq!(error.reconcile_reason(), Some("incomplete_readback"));
+    assert_eq!(failed_paths_of(&error), vec!["c.json".to_string()]);
+
+    // Subset: two submitted, one returned.
+    broker.set_commit_files_tamper_next(CommitFilesTamper::OmitLast);
+    let error = client
+        .commit(&CommitRequest {
+            expected_head: broker.head(),
+            message: "subset read-back".to_string(),
+            op_id: Some("op-subset".to_string()),
+            files: vec![
+                CommitFile {
+                    path: "d.json".to_string(),
+                    content: b"d".to_vec(),
+                },
+                CommitFile {
+                    path: "e.json".to_string(),
+                    content: b"e".to_vec(),
+                },
+            ],
+        })
+        .unwrap_err();
+    assert!(error.is_reconcile_required(), "{error:?}");
+    assert_eq!(error.reconcile_reason(), Some("incomplete_readback"));
+    assert_eq!(failed_paths_of(&error), vec!["e.json".to_string()]);
+
+    // Extra path that was not requested.
+    broker.set_commit_files_tamper_next(CommitFilesTamper::Extra);
+    let error = client
+        .commit(&CommitRequest::single(
+            "f.json",
+            b"f".to_vec(),
+            broker.head(),
+            "extra read-back",
+            Some("op-extra".to_string()),
+        ))
+        .unwrap_err();
+    assert!(error.is_reconcile_required(), "{error:?}");
+    assert_eq!(error.reconcile_reason(), Some("incomplete_readback"));
+    assert_eq!(
+        failed_paths_of(&error),
+        vec!["unrequested.json".to_string()]
+    );
+
+    // Duplicate path in the read-back.
+    broker.set_commit_files_tamper_next(CommitFilesTamper::Duplicate);
+    let error = client
+        .commit(&CommitRequest::single(
+            "g.json",
+            b"g".to_vec(),
+            broker.head(),
+            "duplicate read-back",
+            Some("op-duplicate".to_string()),
+        ))
+        .unwrap_err();
+    assert!(error.is_reconcile_required(), "{error:?}");
+    assert_eq!(error.reconcile_reason(), Some("incomplete_readback"));
+    assert_eq!(failed_paths_of(&error), vec!["g.json".to_string()]);
 }
 
 /// The same path changed by a competing writer must be refused over real HTTP,

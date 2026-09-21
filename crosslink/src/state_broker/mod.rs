@@ -85,5 +85,5 @@ pub use projection::{
 #[allow(unused_imports)]
 pub use transport::{
     message_records_op, CasResolution, OpReconciliation, ProjectStateTransport, ProjectionReport,
-    ReconcileReason,
+    ReconcileReason, VerifiedCas,
 };

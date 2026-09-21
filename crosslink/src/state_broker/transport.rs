@@ -71,6 +71,8 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+use serde_json::Value;
+
 use super::client::{
     CommitOutcome, CommitRequest, ProjectState, StateBlob, StateBrokerClient, VerifiedEntry,
     VerifiedFile,
@@ -150,8 +152,17 @@ impl ReconcileReason {
 ///
 /// Only [`Self::Applied`] and [`Self::AlreadyApplied`] are success shapes, and
 /// both imply content-verified state: a transport result carrying
-/// `verified: false`, or a rebase that cannot be proven safe, is never
-/// representable as success — it becomes [`Self::ReconcileRequired`].
+/// `verified: false`, a response that does not verify every submitted path, or
+/// a rebase that cannot be proven safe is never representable as success — it
+/// becomes [`Self::ReconcileRequired`].
+///
+/// **An `Ok(CasResolution)` is not by itself success.** Write-path callers must
+/// either match this enum exhaustively or call
+/// [`CasResolution::require_success`], which converts every non-success verdict
+/// into a typed [`StateBrokerError`] (including the hard
+/// `op_id_reused_with_different_content` divergence).
+#[must_use = "match the CasResolution variant or call require_success(); \
+              only Applied/AlreadyApplied are success"]
 #[derive(Debug, Clone)]
 pub enum CasResolution {
     /// Our CAS write landed and the read-back verified the payload.
@@ -222,6 +233,87 @@ impl CasResolution {
             Self::AlreadyApplied { .. } | Self::ReconcileRequired { .. } => None,
         }
     }
+
+    /// Convert this resolution into a verified success, or a typed
+    /// reconcile-required error.
+    ///
+    /// This is the supported way for a write path to treat a CAS result as
+    /// success: `Ok(CasResolution)` is not success. The error preserves the
+    /// verdict distinction in `details.reason` — in particular an op-id
+    /// divergence is `"op_id_reused_with_different_content"`, a hard
+    /// non-success that must never be retried blindly.
+    ///
+    /// # Errors
+    ///
+    /// [`BrokerErrorCode::ReconcileRequired`] for every non-success verdict
+    /// ([`ReconcileReason`] label in `details.reason`, observed head and any
+    /// unverified paths in `details`). Never retryable.
+    ///
+    /// [`BrokerErrorCode::ReconcileRequired`]: super::error::BrokerErrorCode::ReconcileRequired
+    pub fn require_success(self) -> Result<VerifiedCas, StateBrokerError> {
+        match self {
+            Self::Applied { outcome, attempts } => Ok(VerifiedCas {
+                commit: outcome.commit,
+                message: outcome.message,
+                files: outcome.files,
+                already_applied: false,
+                attempts,
+            }),
+            Self::AlreadyApplied {
+                commit,
+                message,
+                files,
+                attempts,
+            } => Ok(VerifiedCas {
+                commit,
+                message,
+                files,
+                already_applied: true,
+                attempts,
+            }),
+            Self::ReconcileRequired {
+                reason,
+                observed_head,
+                files,
+                attempts,
+            } => {
+                let failed_paths: Vec<Value> = files
+                    .iter()
+                    .filter(|file| !file.verified)
+                    .map(|file| Value::String(file.path.clone()))
+                    .collect();
+                Err(StateBrokerError::reconcile_required(
+                    format!(
+                        "compare-and-swap did not produce a verified success ({})",
+                        reason.label()
+                    ),
+                    Some(serde_json::json!({
+                        "reason": reason.label(),
+                        "observed_head": observed_head,
+                        "failed_paths": failed_paths,
+                        "attempts": attempts,
+                    })),
+                ))
+            }
+        }
+    }
+}
+
+/// A [`CasResolution`] that was converted into a verified success by
+/// [`CasResolution::require_success`].
+#[derive(Debug, Clone)]
+pub struct VerifiedCas {
+    /// The commit whose content was verified.
+    pub commit: String,
+    /// The commit message (including broker trailers).
+    pub message: String,
+    /// Per-path read-back digests compared against the intended payload.
+    pub files: Vec<VerifiedFile>,
+    /// `true` when the durable head already recorded our op id (nothing new
+    /// was written).
+    pub already_applied: bool,
+    /// Broker `commit` calls made.
+    pub attempts: u8,
 }
 
 /// What explicit op-id reconciliation concluded about a write.
@@ -476,19 +568,25 @@ pub trait ProjectStateTransport {
             let mut current = request.clone();
             current.expected_head.clone_from(&expected_head);
             match self.commit(&current) {
-                Ok(outcome) if outcome.verified => {
+                Ok(outcome)
+                    if outcome.verified
+                        && super::client::outcome_verifies_every_requested_path(
+                            &current, &outcome,
+                        ) =>
+                {
                     return Ok(CasResolution::Applied {
                         outcome,
                         attempts: attempt.saturating_add(1),
                     });
                 }
                 Ok(outcome) => {
-                    // A transport that returns an unverified outcome must not be
-                    // treated as success; the write may have landed partially.
+                    // A transport that returns an unverified or incomplete
+                    // outcome must not be treated as success; the write may
+                    // have landed partially.
                     return Ok(CasResolution::ReconcileRequired {
                         reason: ReconcileReason::AmbiguousWrite {
                             detail: format!(
-                                "transport returned an unverified commit outcome for {}",
+                                "transport returned an unverified or incomplete commit outcome for {}",
                                 outcome.commit
                             ),
                         },
@@ -750,24 +848,40 @@ where
 
     let intended = intended_digests(request);
     let mut overlap = Vec::new();
+    let mut unprovable = Vec::new();
     for path in &paths {
         let base_entry = base.as_ref().and_then(|entries| entries.get(path.as_str()));
         let observed_entry = observed.get(path.as_str());
         let base_present = base_entry.is_some_and(|entry| entry.present);
         let observed_present = observed_entry.is_some_and(|entry| entry.present);
 
-        // Unchanged: present at both with equal digests, or absent at both.
-        if base_present == observed_present {
-            let unchanged = match (base_present, base_entry, observed_entry) {
-                (false, _, _) => true,
-                (true, Some(base_entry), Some(observed_entry)) => {
-                    base_entry.sha256 == observed_entry.sha256
-                        && base_entry.size == observed_entry.size
+        // Absent at both: re-creating the path cannot overwrite anything.
+        if !base_present && !observed_present {
+            continue;
+        }
+        // Present at both: "unchanged" must be proven by matching content
+        // digests. Presence, `blob_sha`, or equal sizes are not content
+        // evidence, so a digest-less read-back is *never* Proven: it is
+        // equivalence-proven or Unprovable.
+        if base_present && observed_present {
+            let base_sha = base_entry.and_then(|entry| entry.sha256.as_deref());
+            let observed_sha = observed_entry.and_then(|entry| entry.sha256.as_deref());
+            match (base_sha, observed_sha) {
+                (Some(base_sha), Some(observed_sha)) if base_sha == observed_sha => continue,
+                (None, _) | (_, None) => {
+                    // No digest evidence on at least one side. Equivalence with
+                    // the intended payload (which requires an observed digest)
+                    // is still a proof; otherwise the rebase cannot be proven.
+                    if observed_entry.is_some_and(|entry| matches_intended(entry, &intended, path))
+                    {
+                        continue;
+                    }
+                    unprovable.push(path.clone());
+                    continue;
                 }
-                (true, _, _) => false,
-            };
-            if unchanged {
-                continue;
+                // Both digests present and different: fall through to the
+                // equivalence check (the observed bytes may already be ours).
+                _ => {}
             }
         }
         // Equivalent: the observed content already equals our intended payload,
@@ -777,10 +891,15 @@ where
         }
         overlap.push(path.clone());
     }
-    if overlap.is_empty() {
-        RebaseProof::Proven
-    } else {
+    if !overlap.is_empty() {
         RebaseProof::Overlap(overlap)
+    } else if !unprovable.is_empty() {
+        RebaseProof::Unprovable(format!(
+            "no content digest for requested path(s): {}",
+            unprovable.join(", ")
+        ))
+    } else {
+        RebaseProof::Proven
     }
 }
 

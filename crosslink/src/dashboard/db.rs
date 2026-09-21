@@ -260,8 +260,12 @@ mod tests {
 
     #[test]
     fn test_default_path_ends_in_dashboard_db() {
-        std::env::set_var("HOME", "/tmp/test-home-crosslink-ops");
-        let p = DashboardDb::default_path().unwrap();
+        // Do NOT mutate process-wide `HOME` here. `cargo test` runs tests
+        // concurrently in one process and child processes inherit the
+        // environment: a leaked HOME redirect hides `~/.gitconfig` (and with
+        // it the `gh` credential helper), so `git` falls back to the editor
+        // askpass and pops credential dialogs during unrelated tests.
+        let p = DashboardDb::default_path().expect("HOME must be set in the test environment");
         assert!(p.ends_with(".crosslink/dashboard.db"));
     }
 

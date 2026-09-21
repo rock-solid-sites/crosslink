@@ -206,9 +206,17 @@ fn detect_default_branch(clone_path: &Path) -> Option<String> {
     // 2. `git remote show origin` — network-scoped but authoritative.
     // Parses `HEAD branch: main` out of the human-readable output.
     let out = Command::new("git")
+        // Best-effort detection only: never let this probe escalate into an
+        // interactive credential prompt. With a GUI-provided askpass (e.g.
+        // VS Code) that showed up as a recurring `Password for
+        // 'https://<id>@github.com'` dialog that blocked the caller for
+        // minutes. Probe unauthenticated instead; callers fall back to the
+        // local branch guesses below when the remote cannot be read.
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GIT_ASKPASS", "")
         .arg("-C")
         .arg(clone_path)
-        .args(["remote", "show", "origin"])
+        .args(["-c", "credential.helper=", "remote", "show", "origin"])
         .output()
         .ok()?;
     if out.status.success() {
@@ -857,6 +865,20 @@ mod tests {
             .arg("-C")
             .arg(path)
             .args(["remote", "add", "origin", origin])
+            .status()
+            .unwrap();
+        // Record a local `origin/HEAD` so `detect_default_branch()` resolves
+        // via `git symbolic-ref` and never probes the network. These fixture
+        // URLs point at non-existent GitHub repos; the network probe only
+        // adds latency (and, historically, an interactive credential prompt).
+        StdCommand::new("git")
+            .arg("-C")
+            .arg(path)
+            .args([
+                "symbolic-ref",
+                "refs/remotes/origin/HEAD",
+                "refs/remotes/origin/main",
+            ])
             .status()
             .unwrap();
         if with_hub {

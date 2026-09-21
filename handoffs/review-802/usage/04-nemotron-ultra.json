@@ -1,0 +1,34 @@
+{
+  "expected_model": "opencode/nemotron-3-ultra-free",
+  "session_id": "ses_f3dc9cd56ffeALVdpn6hXnQV5X",
+  "resolved_model": "nemotron-3-ultra-free",
+  "provider": "opencode",
+  "assistant_messages": 14,
+  "tokens": {
+    "input": 375874,
+    "output": 6946,
+    "reasoning": 1390,
+    "cache_read": 820800,
+    "cache_write": 0,
+    "total": 1205010
+  },
+  "cost_usd": 0.0,
+  "finish_reasons": [
+    "tool-calls",
+    "tool-calls",
+    "tool-calls",
+    "tool-calls",
+    "tool-calls",
+    "tool-calls",
+    "tool-calls",
+    "tool-calls",
+    "tool-calls",
+    "tool-calls",
+    "tool-calls",
+    "tool-calls",
+    "tool-calls",
+    "stop"
+  ],
+  "extraction": "raw events (export truncated)",
+  "rule_violation": "reviewer wrote REVIEW.md into its own packet copy despite the read-only rule; contained to the copy, recovered as the report source"
+}

@@ -202,21 +202,14 @@ The hub's remote transport boundary is:
 Those operate on Crosslink's v3 multi-ref layout
 (`refs/heads/crosslink/agents/*`, `crosslink/checkpoint`, `crosslink/meta`)
 while the broker owns a single state tree under
-`refs/heads/projects/<uuid>/state`. Swapping the transport therefore requires
-one design decision that is intentionally **not** made here:
-
-> **How Crosslink's v3 per-agent refs map onto the broker's single state
-> tree.** Options: (a) one file per per-agent ref tip (`agents/<id>/events.log`,
-> `checkpoint/state.json`, `meta/hub.json`) with a whole-tree CAS per mutation —
-> simple but serializes all writers and needs chunking for the 32-file/256 KiB/
-> 1 MiB limits; (b) event-log shards per agent per commit; (c) keep per-agent
-> refs by storing ref-index files. Until that is decided and reviewed, wiring
-> `SyncManager` to the broker would change the hub's concurrency model, which
-> the task's "do not redesign Crosslink" constraint forbids.
-
-Because the trait already expresses the broker's semantics, adopting option (a)
-later is an adapter implementation plus call-site routing — no redesign of
-`hydrate`/`db`/`compaction`.
+`refs/heads/projects/<uuid>/state`. The mapping decision this document
+originally deferred is now recorded in **`.design/state-broker-authority-adr.md`**
+(ADR-802, status *Proposed — binding for any `SyncManager` wiring until
+superseded*): adopt **C now** (broker = derived checkpoint/read tier plus a
+bounded inbox transport; v3 per-agent refs remain the journal of record), reject
+option A as steady state, and track per-writer heads (B) as a broker-v2 goal.
+Wiring `SyncManager` remains out of scope here and is gated by the ADR's safe
+condition.
 
 ### Remaining assumptions (WHAT-NOT-TESTED)
 

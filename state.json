@@ -1,5 +1,5 @@
 {
-  "next_display_id": 803,
+  "next_display_id": 804,
   "next_comment_id": 1179,
   "display_id_map": {
     "00a365a3-7b31-465a-aced-4f1e39c68f8b": 118,
@@ -697,6 +697,7 @@
     "dd1202c5-651d-4596-b25d-65378d4e1812": 739,
     "dee26255-71db-4be3-aace-6375cbc837ee": 100,
     "dee298fa-1dea-49b9-911b-5476cb695e0b": 194,
+    "dfd4df53-1104-4175-9ed0-b2a8d12fd6db": 803,
     "dfebabfa-a1b9-4368-8305-9a7d8bdc51c9": 413,
     "e04ea189-7ee7-4568-b491-2be56119e731": 486,
     "e05119c3-b4a1-482c-8041-439768b62b56": 649,
@@ -21902,6 +21903,17 @@
         }
       }
     },
+    "dfd4df53-1104-4175-9ed0-b2a8d12fd6db": {
+      "uuid": "dfd4df53-1104-4175-9ed0-b2a8d12fd6db",
+      "display_id": 803,
+      "title": "agents-hygiene tests flake: run_sync target is crosslink_dir.parent()/AGENTS.md (shared /tmp path under parallel tests)",
+      "description": "Steps to reproduce:\n1. \n\nExpected: \nActual: \n\nDiscovered while verifying issue #802 (state broker adapter). Not caused by that change; the module is untouched there.\n\nObservation: commands::agents_hygiene::tests is parallelism/order flaky. In 15 consecutive isolated module runs of 'cargo test --bin crosslink commands::agents_hygiene::tests', 2 runs failed 1 of 16 tests; the same tests pass individually. The full bin suite failed once on commands::agents_hygiene::tests::test_sync_then_check_is_current, then passed that module on the next run.\n\nRoot cause (evidence-based): run_sync (and run_check via it) computes the install target as crosslink_dir.parent().unwrap_or(crosslink_dir).join(\"AGENTS.md\"). The unit tests pass a bare tempfile::tempdir() as crosslink_dir, so the parent is /tmp and every concurrent test in the binary reads/writes the shared path /tmp/AGENTS.md. Tests that assert on content they wrote race each other there.\n\nReproduction: for i in 1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15; do cargo test --bin crosslink commands::agents_hygiene::tests 2>/dev/null | grep '^test result'; done\n\nMinimal fix (not applied here to keep issue #802 scoped): have the tests pass a tempdir/.crosslink subdirectory (so target = tempdir/AGENTS.md), or give run_sync/run_check an explicit target override for tests. No production behavior change is implied by the test-only fix.\n\nWHAT-NOT-TESTED: not reproduced against the preserved baseline binary directly (the source file is unchanged by #802; the mechanism is entirely inside agents_hygiene).",
+      "status": "open",
+      "priority": "low",
+      "created_by": "driver",
+      "created_at": "2026-09-21T03:42:12.645831921Z",
+      "updated_at": "2026-09-21T03:42:12.645831921Z"
+    },
     "dfebabfa-a1b9-4368-8305-9a7d8bdc51c9": {
       "uuid": "dfebabfa-a1b9-4368-8305-9a7d8bdc51c9",
       "display_id": 413,
@@ -25884,11 +25896,16 @@
       "agent_id": "driver",
       "agent_seq": 70,
       "timestamp": "2026-09-21T03:19:05.500022695Z"
+    },
+    {
+      "agent_id": "driver",
+      "agent_seq": 71,
+      "timestamp": "2026-09-21T03:42:12.645831921Z"
     }
   ],
   "watermark": {
-    "timestamp": "2026-09-21T03:19:05.500022695Z",
+    "timestamp": "2026-09-21T03:42:12.645831921Z",
     "agent_id": "driver",
-    "agent_seq": 70
+    "agent_seq": 71
   }
 }

@@ -588,7 +588,7 @@ fn commit_cas_reports_a_head_that_moves_during_reconciliation() {
     .expect("direct commit");
 
     let transport = MoveHeadOnRecheck {
-        inner: mock.clone(),
+        inner: mock,
         reads: Cell::new(0),
         moved: Cell::new(false),
     };

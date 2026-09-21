@@ -121,7 +121,8 @@ Every projection carries a marker file
 (`.crosslink-state-projection+v1.json`, deliberately outside the broker path
 grammar) recording:
 
-- the broker project UUID and state ref (backend/project binding);
+- the broker project UUID and state ref (backend/project binding), plus the
+  backend host label when the transport has one;
 - the head commit the projection was materialized from;
 - the logical path, size, and SHA-256 of every projected file;
 - a `complete` flag that is set only after the last file is on disk.
@@ -353,9 +354,15 @@ crosslink/src/lib.rs                                  (pub mod state_broker)
 crosslink/src/main.rs                                 (mod + `state-broker` command)
 crosslink/src/commands/mod.rs                         (pub mod state_broker)
 crosslink/src/commands/state_broker.rs                (new: read-only CLI)
-crosslink/src/state_broker/…                          (new module, 9 files)
+crosslink/src/state_broker/…                          (new module)
 crosslink/tests/state_broker_contract.rs              (new: loopback stub contract tests)
 crosslink/tests/state_broker_live.rs                  (new: ignored read-only live probe)
 .design/state-broker-transport.md                     (this document)
+.design/state-broker-authority-adr.md                 (ADR-802 mapping decision)
+handoffs/802-hardening.md                             (decision-independent hardening report)
 CHANGELOG.md                                          (Unreleased entry)
 ```
+
+Review hardening (branch `fix/pp3g-802-decision-independent-hardening`) adds
+`crosslink/src/state_broker/projection.rs` and extends the files above; see
+`handoffs/802-hardening.md` for the finding-by-finding disposition.

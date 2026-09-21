@@ -636,10 +636,11 @@ impl StateBrokerClient {
     /// # Errors
     ///
     /// [`BrokerErrorCode::InvalidInput`] for locally-rejected input,
-    /// [`BrokerErrorCode::ReconcileRequired`] for an ambiguous write, plus
+    /// [`BrokerErrorCode::ReconcileRequired`] for an ambiguous write, and the
     /// definite rejections (`unauthorized`, `scope_violation`, `not_found`,
-    /// `method_not_allowed`, `stale_state`) and transport failures before the
-    /// request could be sent.
+    /// `method_not_allowed`, `stale_state`) unchanged. Any transport failure on
+    /// the POST is treated as ambiguous, even when the request may not have
+    /// left the machine: a blind write retry is never allowed.
     ///
     /// [`BrokerErrorCode::InvalidInput`]: super::error::BrokerErrorCode::InvalidInput
     /// [`BrokerErrorCode::ReconcileRequired`]: super::error::BrokerErrorCode::ReconcileRequired
@@ -672,13 +673,8 @@ impl StateBrokerClient {
         };
         // A success must be content-verified both overall and per file: a
         // transport that disagrees with itself is not an ordinary success.
-        let unverified_files: Vec<String> = outcome
-            .files
-            .iter()
-            .filter(|file| !file.verified)
-            .map(|file| file.path.clone())
-            .collect();
-        if !outcome.verified || !unverified_files.is_empty() {
+        let has_unverified_files = outcome.files.iter().any(|file| !file.verified);
+        if !outcome.verified || has_unverified_files {
             return Err(reconcile_required_for_outcome(
                 request,
                 &outcome,

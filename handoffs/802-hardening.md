@@ -158,6 +158,11 @@ These are unchanged by this work and are owned by ADR-802 (binding for wiring):
    nothing here presumes it or precludes it.
 7. **Live evidence**: no live broker call was made. The ignored read-only probe
    remains the first step for the operator.
+8. **Advisory baseline and unbounded full-inventory hydration**: `baseline.matches`
+   is reported but gates nothing (whether it is advisory or binding is an ADR
+   question), and `hydrate_into(None)` materializes the full inventory without a
+   size/count budget (disk-exhaustion hazard; a cap belongs with the C-tier
+   size policy).
 
 ## 9. WHAT-NOT-TESTED
 

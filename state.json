@@ -1,6 +1,6 @@
 {
   "next_display_id": 805,
-  "next_comment_id": 1181,
+  "next_comment_id": 1182,
   "display_id_map": {
     "00a365a3-7b31-465a-aced-4f1e39c68f8b": 118,
     "01b74b94-82e0-4bda-9bed-7eace0292544": 70,
@@ -7814,11 +7814,22 @@
       "parent_uuid": "b204e835-0918-4acb-b476-ee3c3c0dcd04",
       "created_by": "driver",
       "created_at": "2026-09-21T14:54:47.339544979Z",
-      "updated_at": "2026-09-21T14:55:00.662267799Z",
+      "updated_at": "2026-09-21T18:13:11.209248573Z",
       "labels": [
         "architecture",
         "state-broker"
-      ]
+      ],
+      "comments": {
+        "904c85cd-d329-4be8-bf8e-22a4ff372eb5": {
+          "display_id": 1181,
+          "author": "driver",
+          "content": "CDP-1 implementation complete on branch feat/pp3g-804-cdp1 @ 74f989c99 (5 commits from hardening base d4105831e). Protocol revision 7e3f71f94 applied unchanged; handoff: handoffs/804-cdp1-implementation.md.\n\nScope delivered: cdp1 module (manifest/payload/capacity/source/attempt/publisher/reader/projection, 5696 LOC), CLI 'state-broker publish-checkpoint [--dry-run] [--verify-full]', ADR-802 §17 item 9 journal high-water-mark check at append, repo↔project-UUID binding (S3), provenance/hydration gate (S4), decoded/wire parameterization (S5), semantic-identity rules (S1), pinned+inventory reader checks (S2).\n\nTests: 150 lib state_broker, 151 bin state_broker, 54 hub_v3, 21 loopback contract (5 CDP-1), 3000 bin suite, 201 cli_integration; 3 ignored read-only live probes. Clippy/fmt clean on the new code; git diff --check clean. No live write, no SyncManager wiring, no push.\n\nPre-L1 gaps: (1) decoded-vs-wire broker limit accounting unresolved without the broker source or a reviewed live boundary probe (L2); (2) historical-commit serving has a read-only probe but was not run (needs an operator-supplied non-head commit); (3) trailer behavior under contention is untestable without a write. Live L1 is not yet safe to authorize; independent implementation review is the next step.",
+          "created_at": "2026-09-21T18:13:11.200142332Z",
+          "kind": "note",
+          "signed_by": "SHA256:cx5PuRP0j7pktPKktl0WwbMp5uEwfFy9WoiBcgyhe18",
+          "signature": "U1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAguEQKo5PmNONBqYSfFi6Ry6tvLy9D5GLM9YcPkF7QNdoAAAARY3Jvc3NsaW5rLWNvbW1lbnQAAAAAAAAABnNoYTUxMgAAAFMAAAALc3NoLWVkMjU1MTkAAABAlN5EpQY1+LHoFh3RkXqmp8+Ku8G0/YLW3ncPxt5VWaKbqpV2vwjSPib6uaCeQfCpKwSVH8BSw5YxBXYTWb/0AA=="
+        }
+      }
     },
     "496f1935-c624-458f-a380-e93bc7da6a07": {
       "uuid": "496f1935-c624-458f-a380-e93bc7da6a07",
@@ -25975,11 +25986,16 @@
       "agent_id": "driver",
       "agent_seq": 79,
       "timestamp": "2026-09-21T14:55:00.662267799Z"
+    },
+    {
+      "agent_id": "driver",
+      "agent_seq": 80,
+      "timestamp": "2026-09-21T18:13:11.209248573Z"
     }
   ],
   "watermark": {
-    "timestamp": "2026-09-21T14:55:00.662267799Z",
+    "timestamp": "2026-09-21T18:13:11.209248573Z",
     "agent_id": "driver",
-    "agent_seq": 79
+    "agent_seq": 80
   }
 }

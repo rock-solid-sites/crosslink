@@ -670,12 +670,20 @@ impl StateBrokerClient {
             Ok(outcome) => outcome,
             Err(error) => return Err(self.classify_commit_failure(request, error)),
         };
-        if !outcome.verified {
+        // A success must be content-verified both overall and per file: a
+        // transport that disagrees with itself is not an ordinary success.
+        let unverified_files: Vec<String> = outcome
+            .files
+            .iter()
+            .filter(|file| !file.verified)
+            .map(|file| file.path.clone())
+            .collect();
+        if !outcome.verified || !unverified_files.is_empty() {
             return Err(reconcile_required_for_outcome(
                 request,
                 &outcome,
                 "verified_false",
-                "broker reported verified=false; the write may have landed partially — \
+                "broker reported an unverified write; the write may have landed partially — \
                  reconcile by op id before retrying",
             ));
         }

@@ -51,6 +51,12 @@ struct StubState {
     /// Return `verified: false` on the next commit response even though the
     /// commit lands (broker read-back-disagreement shape).
     unverified_next: bool,
+    /// Return per-file `verified: false` with overall `verified: true` on the
+    /// next commit response (a self-contradicting transport).
+    unverified_files_next: bool,
+    /// Return the broker's ref-update-race `stale_state` shape (with
+    /// `unattached_commit`) for the next commit.
+    stale_unattached_next: bool,
 }
 
 struct StubBroker {
@@ -79,6 +85,8 @@ impl StubBroker {
             readback_mismatch_next: false,
             project_uuid_override: None,
             unverified_next: false,
+            unverified_files_next: false,
+            stale_unattached_next: false,
         }));
         let stop = Arc::new(AtomicBool::new(false));
         let thread_state = Arc::clone(&state);
@@ -166,6 +174,18 @@ impl StubBroker {
     /// read-back-disagreement shape).
     fn set_unverified_next(&self) {
         self.lock().unverified_next = true;
+    }
+
+    /// Land the next commit and report per-file `verified: false` while the
+    /// overall flag says `true` (a self-contradicting transport).
+    fn set_unverified_files_next(&self) {
+        self.lock().unverified_files_next = true;
+    }
+
+    /// Return the broker's ref-update-race `stale_state` shape (the commit
+    /// object exists but no ref points to it).
+    fn set_stale_unattached_next(&self) {
+        self.lock().stale_unattached_next = true;
     }
 
     fn head(&self) -> Option<String> {
@@ -525,6 +545,32 @@ fn route(request: &StubRequest, state: &Arc<Mutex<StubState>>) -> (u16, serde_js
                     error_envelope("method_not_allowed", "POST only", false),
                 );
             }
+            if guard.stale_unattached_next {
+                guard.stale_unattached_next = false;
+                let observed = guard
+                    .head
+                    .clone()
+                    .map_or(serde_json::Value::Null, serde_json::Value::String);
+                return (
+                    409,
+                    serde_json::json!({
+                        "ok": false,
+                        "operation": "state.commit",
+                        "request_id": "stub",
+                        "error": {
+                            "code": "stale_state",
+                            "message": "state ref changed while committing; the commit was not applied",
+                            "retryable": true,
+                            "details": {
+                                "ref": state_ref(&guard.project_uuid),
+                                "expected_head": observed,
+                                "observed_head": observed,
+                                "unattached_commit": "d".repeat(40),
+                            },
+                        },
+                    }),
+                );
+            }
             let body: serde_json::Value = match serde_json::from_slice(&request.body) {
                 Ok(value) => value,
                 Err(_) => return (400, error_envelope("invalid_input", "bad JSON body", false)),
@@ -585,11 +631,17 @@ fn route(request: &StubRequest, state: &Arc<Mutex<StubState>>) -> (u16, serde_js
             }
 
             let previous_head = guard.head.clone();
-            let verified_flag = if guard.unverified_next {
+            let overall_flag = if guard.unverified_next {
                 guard.unverified_next = false;
                 false
             } else {
                 true
+            };
+            let file_flag = if guard.unverified_files_next {
+                guard.unverified_files_next = false;
+                false
+            } else {
+                overall_flag
             };
             let mut verified = Vec::new();
             for file in &files {
@@ -609,7 +661,7 @@ fn route(request: &StubRequest, state: &Arc<Mutex<StubState>>) -> (u16, serde_js
                     "blob_sha": pseudo_sha(&content),
                     "sha256": sha256_hex(&content),
                     "size": content.len(),
-                    "verified": verified_flag,
+                    "verified": file_flag,
                 }));
             }
             guard.counter += 1;
@@ -636,7 +688,7 @@ fn route(request: &StubRequest, state: &Arc<Mutex<StubState>>) -> (u16, serde_js
                     "message": full_message,
                     "op_id": op_id,
                     "files": verified,
-                    "verified": verified_flag,
+                    "verified": overall_flag,
                 }),
             )
         }
@@ -1345,6 +1397,36 @@ fn verified_false_is_never_an_ordinary_success() {
     assert_eq!(broker.head(), Some(landed));
 }
 
+/// A transport that contradicts itself (overall `verified: true` but per-file
+/// `verified: false`) is still not an ordinary success.
+#[test]
+fn per_file_unverified_is_never_an_ordinary_success() {
+    let broker = StubBroker::start();
+    broker.seed(vec![("a.json", b"{}".to_vec())]);
+    let client = broker.client();
+
+    broker.set_unverified_files_next();
+    let error = client
+        .commit(&CommitRequest::single(
+            "c.json",
+            b"three".to_vec(),
+            broker.head(),
+            "self-contradicting read-back",
+            Some("op-contradiction".to_string()),
+        ))
+        .unwrap_err();
+    assert!(error.is_reconcile_required(), "{error:?}");
+    assert_eq!(error.reconcile_reason(), Some("verified_false"));
+    assert_eq!(
+        error
+            .details()
+            .and_then(|details| details.get("failed_paths"))
+            .and_then(|value| value.as_array())
+            .map(Vec::len),
+        Some(1)
+    );
+}
+
 /// The same path changed by a competing writer must be refused over real HTTP,
 /// not clobbered by the CAS rebase.
 #[test]
@@ -1394,6 +1476,58 @@ fn same_path_rebase_is_refused_through_the_client() {
         b"{\"n\":2}".to_vec(),
         "the competing writer's bytes must survive"
     );
+}
+
+/// The broker's ref-update-race `stale_state` (commit object exists, no ref
+/// points to it) must surface as a typed, retryable stale error with the
+/// unattached commit preserved — and `commit_cas` must treat it as
+/// "not landed", rebasing only after the non-overlap proof.
+#[test]
+fn stale_state_with_unattached_commit_is_preserved() {
+    let broker = StubBroker::start();
+    broker.seed(vec![("a.json", b"one".to_vec())]);
+    let client = broker.client();
+    let base = broker.head().unwrap();
+
+    broker.set_stale_unattached_next();
+    let error = client
+        .commit(&CommitRequest::single(
+            "b.json",
+            b"two".to_vec(),
+            Some(base.clone()),
+            "race",
+            Some("op-race".to_string()),
+        ))
+        .unwrap_err();
+    assert!(error.is_stale_state());
+    assert!(error.retryable());
+    assert_eq!(
+        error
+            .details()
+            .and_then(|details| details.get("unattached_commit"))
+            .and_then(|value| value.as_str()),
+        Some("d".repeat(40).as_str()),
+        "the unattached commit sha must be recoverable"
+    );
+
+    // commit_cas reconciles: the head does not record our op id, the requested
+    // path is absent at both heads, so the rebase is proven and applied.
+    broker.set_stale_unattached_next();
+    let resolution = client
+        .commit_cas(
+            &CommitRequest::single(
+                "b.json",
+                b"two".to_vec(),
+                Some(base),
+                "race",
+                Some("op-race".to_string()),
+            ),
+            1,
+        )
+        .expect("verdict");
+    assert!(resolution.is_verified(), "{resolution:?}");
+    assert_eq!(resolution.attempts(), 2, "one conflict, one proven rebase");
+    assert_eq!(broker.file("b.json").unwrap(), b"two".to_vec());
 }
 
 /// Non-ASCII commit messages must not panic the client or the broker's

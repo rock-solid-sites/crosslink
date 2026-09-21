@@ -1,0 +1,44 @@
+{
+  "requested_model": "opencode/big-pickle",
+  "requested_model_failures": [
+    {
+      "attempt": 1,
+      "exit": 1,
+      "error": "APIError 403: OpenCode's free tier can only be used from within OpenCode",
+      "duration_s": 60
+    },
+    {
+      "attempt": 2,
+      "exit": 1,
+      "error": "same 403 on retry"
+    }
+  ],
+  "substitute_model": "opencode/mimo-v2.5-free",
+  "substitute_reason": "Big Pickle failed twice with the same provider-side free-tier error; MiMo V2.5 Free is the nearest free-Zen class substitute with a different family and passed a liveness probe",
+  "session_id": "ses_f3dc6d92cffePhFQb9Zou0Ppzf",
+  "resolved_model": "mimo-v2.5-free",
+  "provider": "opencode",
+  "tokens": {
+    "input": 162323,
+    "output": 6284,
+    "reasoning": 258,
+    "cache_read": 743552,
+    "cache_write": 0,
+    "total": 912417
+  },
+  "cost_usd": 0.0,
+  "finish_reasons": [
+    "tool-calls",
+    "tool-calls",
+    "tool-calls",
+    "tool-calls",
+    "tool-calls",
+    "tool-calls",
+    "tool-calls",
+    "tool-calls",
+    "stop"
+  ],
+  "terminal_error": "APIError 403 'free tier can only be used from within OpenCode' after the report text was emitted; exit code 1",
+  "extraction": "raw events (report complete in the final text part)",
+  "assistant_messages": 9
+}

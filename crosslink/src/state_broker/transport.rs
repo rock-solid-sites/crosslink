@@ -153,7 +153,7 @@ pub trait ProjectStateTransport {
         };
 
         let selected: Vec<String> = match paths {
-            Some(list) if list.is_empty() => {
+            Some([]) => {
                 return Err(StateBrokerError::invalid_input(
                     "hydrate path list must not be empty (use None for the full inventory)",
                 ));
@@ -246,7 +246,7 @@ pub trait ProjectStateTransport {
         let mut attempt: u8 = 0;
         loop {
             let mut current = request.clone();
-            current.expected_head = expected_head.clone();
+            current.expected_head.clone_from(&expected_head);
             match self.commit(&current) {
                 Ok(outcome) => {
                     return Ok(CasResolution {
@@ -275,7 +275,7 @@ pub trait ProjectStateTransport {
                             let verified = files.iter().all(|file| file.verified);
                             return Ok(CasResolution {
                                 outcome: CommitOutcome {
-                                    state_ref: state.state.state_ref.clone(),
+                                    state_ref: state.state.state_ref,
                                     commit: head.commit.clone(),
                                     previous_head: None,
                                     head_after: Some(head.commit.clone()),
@@ -341,10 +341,10 @@ impl ProjectStateTransport for StateBrokerClient {
 /// [`BrokerErrorCode::Configuration`] for a partial/invalid environment, or
 /// when the HTTP client cannot be constructed.
 pub fn transport_from_env() -> Result<Option<StateBrokerClient>, StateBrokerError> {
-    match StateBrokerConfig::from_env()? {
-        Some(config) => StateBrokerClient::new(config).map(Some),
-        None => Ok(None),
-    }
+    StateBrokerConfig::from_env()?.map_or_else(
+        || Ok(None),
+        |config| StateBrokerClient::new(config).map(Some),
+    )
 }
 
 #[cfg(test)]

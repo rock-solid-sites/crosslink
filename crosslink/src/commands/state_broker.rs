@@ -93,13 +93,21 @@ fn status(crosslink_dir: &Path, json: bool) -> Result<()> {
                 println!("  files:         {file_count}");
                 println!(
                     "  baseline:      {} (expected {}, observed {})",
-                    if baseline_matches { "matches" } else { "MISMATCH" },
+                    if baseline_matches {
+                        "matches"
+                    } else {
+                        "MISMATCH"
+                    },
                     baseline_expected,
                     baseline_observed.as_deref().unwrap_or("(unreadable)")
                 );
                 println!(
                     "  registry:      {}",
-                    if registry_present { "present" } else { "absent" }
+                    if registry_present {
+                        "present"
+                    } else {
+                        "absent"
+                    }
                 );
             }
             Ok(())
@@ -129,13 +137,13 @@ fn report_local(json: bool) -> Result<()> {
 /// Host-only label for the broker (path segments are never secret, but there
 /// is no reason to print them).
 fn host_of(base_url: &str) -> String {
-    base_url
-        .split_once("://")
-        .map(|(scheme, rest)| {
+    base_url.split_once("://").map_or_else(
+        || base_url.to_string(),
+        |(scheme, rest)| {
             let host = rest.split('/').next().unwrap_or(rest);
             format!("{scheme}://{host}")
-        })
-        .unwrap_or_else(|| base_url.to_string())
+        },
+    )
 }
 
 #[cfg(test)]

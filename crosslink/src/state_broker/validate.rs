@@ -65,7 +65,9 @@ pub fn validate_logical_path(path: &str) -> Result<(), StateBrokerError> {
         return Err(invalid("logical path must not start or end with '/'"));
     }
     if path.contains('\\') || path.contains('\0') {
-        return Err(invalid("logical path must not contain backslashes or NUL bytes"));
+        return Err(invalid(
+            "logical path must not contain backslashes or NUL bytes",
+        ));
     }
     let segments: Vec<&str> = path.split('/').collect();
     if segments.len() > MAX_PATH_SEGMENTS {
@@ -103,14 +105,15 @@ pub fn validate_message(message: &str) -> Result<(), StateBrokerError> {
             "commit message must be at most {MAX_MESSAGE_LENGTH} characters"
         )));
     }
-    if message.chars().any(|c| c.is_control()) {
+    if message.chars().any(char::is_control) {
         return Err(invalid(
             "commit message must be a single line with no control characters",
         ));
     }
     let trimmed = message.trim();
     for trailer in ["Project-UUID:", "Broker:", "Broker-Op:"] {
-        if trimmed.len() >= trailer.len() && trimmed[..trailer.len()].eq_ignore_ascii_case(trailer) {
+        if trimmed.len() >= trailer.len() && trimmed[..trailer.len()].eq_ignore_ascii_case(trailer)
+        {
             return Err(invalid(
                 "commit message must not begin with a broker trailer key",
             ));
@@ -135,9 +138,7 @@ pub fn validate_op_id(op_id: &str) -> Result<(), StateBrokerError> {
         .chars()
         .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | ':' | '-'))
     {
-        return Err(invalid(
-            "op_id may only contain [A-Za-z0-9._:-] characters",
-        ));
+        return Err(invalid("op_id may only contain [A-Za-z0-9._:-] characters"));
     }
     Ok(())
 }
@@ -170,9 +171,7 @@ pub fn validate_commit_sha(value: &str) -> Result<(), StateBrokerError> {
 /// Whether `value` is a lowercase canonical RFC 4122 UUID.
 #[must_use]
 pub fn is_canonical_uuid(value: &str) -> bool {
-    uuid::Uuid::parse_str(value)
-        .map(|parsed| parsed.to_string() == value)
-        .unwrap_or(false)
+    uuid::Uuid::parse_str(value).is_ok_and(|parsed| parsed.to_string() == value)
 }
 
 /// Validate that `value` is a lowercase canonical RFC 4122 UUID.
@@ -184,9 +183,7 @@ pub fn validate_project_uuid(value: &str) -> Result<(), StateBrokerError> {
     if is_canonical_uuid(value) {
         Ok(())
     } else {
-        Err(invalid(
-            "project uuid must be a lowercase RFC 4122 uuid",
-        ))
+        Err(invalid("project uuid must be a lowercase RFC 4122 uuid"))
     }
 }
 

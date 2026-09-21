@@ -82,7 +82,7 @@ impl SecretToken {
 
     /// Whether the wrapped token is empty.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
 }
@@ -121,7 +121,7 @@ impl StateBrokerConfig {
     /// Returns [`BrokerErrorCode::Configuration`] for a non-http(s) URL, an
     /// `http://` URL pointing at a non-loopback host (the token would travel in
     /// cleartext), a non-canonical project UUID, an empty token, or a timeout
-    /// outside `1..=`[`MAX_TIMEOUT_MS`].
+    /// outside the range 1 to [`MAX_TIMEOUT_MS`].
     pub fn new(
         base_url: impl Into<String>,
         project_uuid: impl Into<String>,
@@ -340,10 +340,7 @@ impl StateBackend {
     /// # Errors
     ///
     /// See [`Self::resolve`].
-    pub fn resolve_with<F>(
-        crosslink_dir: &Path,
-        lookup: F,
-    ) -> Result<Self, StateBrokerError>
+    pub fn resolve_with<F>(crosslink_dir: &Path, lookup: F) -> Result<Self, StateBrokerError>
     where
         F: Fn(&str) -> Option<String>,
     {
@@ -356,16 +353,17 @@ impl StateBackend {
         };
 
         match configured.as_deref() {
-            None => Ok(Self::Local),
-            Some(BACKEND_LOCAL | "local" | "direct") => Ok(Self::Local),
-            Some(BACKEND_BROKER) => match StateBrokerConfig::from_lookup(&lookup)? {
-                Some(config) => Ok(Self::Broker(config)),
-                None => Err(configuration_error(format!(
-                    "state_backend=broker is selected but no broker settings are present; \
-                     set {ENV_BROKER_URL}, {ENV_BROKER_TOKEN} (or {ENV_BROKER_TOKEN_FILE}), \
-                     and {ENV_PROJECT_UUID}"
-                ))),
-            },
+            None | Some(BACKEND_LOCAL | "local" | "direct") => Ok(Self::Local),
+            Some(BACKEND_BROKER) => StateBrokerConfig::from_lookup(&lookup)?.map_or_else(
+                || {
+                    Err(configuration_error(format!(
+                        "state_backend=broker is selected but no broker settings are present; \
+                         set {ENV_BROKER_URL}, {ENV_BROKER_TOKEN} (or {ENV_BROKER_TOKEN_FILE}), \
+                         and {ENV_PROJECT_UUID}"
+                    )))
+                },
+                |config| Ok(Self::Broker(config)),
+            ),
             Some(other) => Err(configuration_error(format!(
                 "unknown state backend {other:?}; expected \"{BACKEND_LOCAL}\" or \"{BACKEND_BROKER}\""
             ))),
@@ -452,9 +450,8 @@ fn normalize_base_url(raw: &str) -> Result<String, StateBrokerError> {
 
 /// Read a token from `path`, trimming surrounding whitespace.
 fn read_token_file(path: &str) -> Result<String, StateBrokerError> {
-    let raw = std::fs::read_to_string(path).map_err(|e| {
-        configuration_error(format!("cannot read broker token file {path:?}: {e}"))
-    })?;
+    let raw = std::fs::read_to_string(path)
+        .map_err(|e| configuration_error(format!("cannot read broker token file {path:?}: {e}")))?;
     let token = raw.trim().to_string();
     if token.is_empty() {
         return Err(configuration_error(format!(
@@ -526,7 +523,10 @@ mod tests {
         assert_eq!(config.base_url(), "https://broker.example.workers.dev");
         assert_eq!(config.project_uuid(), UUID);
         assert_eq!(config.timeout(), Duration::from_millis(DEFAULT_TIMEOUT_MS));
-        assert_eq!(config.state_ref(), format!("refs/heads/projects/{UUID}/state"));
+        assert_eq!(
+            config.state_ref(),
+            format!("refs/heads/projects/{UUID}/state")
+        );
         assert_eq!(config.state_branch(), format!("projects/{UUID}/state"));
         assert!(config.is_state_ref("state"));
         assert!(config.is_state_ref(&config.state_ref()));
@@ -559,10 +559,7 @@ mod tests {
         std::fs::write(&token_path, format!("  {TOKEN}\n")).unwrap();
         let config = StateBrokerConfig::from_lookup(lookup_from(&[
             (ENV_BROKER_URL, "https://broker.example"),
-            (
-                ENV_BROKER_TOKEN_FILE,
-                token_path.to_str().unwrap(),
-            ),
+            (ENV_BROKER_TOKEN_FILE, token_path.to_str().unwrap()),
             (ENV_PROJECT_UUID, UUID),
         ]))
         .unwrap()
@@ -584,8 +581,13 @@ mod tests {
 
     #[test]
     fn plain_http_non_loopback_is_rejected() {
-        let error = StateBrokerConfig::new("http://broker.example.com", UUID, TOKEN, Duration::from_secs(15))
-            .unwrap_err();
+        let error = StateBrokerConfig::new(
+            "http://broker.example.com",
+            UUID,
+            TOKEN,
+            Duration::from_secs(15),
+        )
+        .unwrap_err();
         assert_eq!(error.code(), BrokerErrorCode::Configuration);
         assert!(error.message().contains("cleartext"));
     }
@@ -629,13 +631,9 @@ mod tests {
             Duration::from_secs(15)
         )
         .is_err());
-        assert!(StateBrokerConfig::new(
-            "https://broker.example",
-            UUID,
-            TOKEN,
-            Duration::ZERO
-        )
-        .is_err());
+        assert!(
+            StateBrokerConfig::new("https://broker.example", UUID, TOKEN, Duration::ZERO).is_err()
+        );
         assert!(StateBrokerConfig::new(
             "https://broker.example",
             UUID,
@@ -683,22 +681,16 @@ mod tests {
         assert_eq!(backend.broker().unwrap().project_uuid(), UUID);
 
         // Environment overrides the hook-config value.
-        let backend = StateBackend::resolve_with(
-            dir.path(),
-            lookup_from(&[(ENV_BACKEND, "git")]),
-        )
-        .unwrap();
+        let backend =
+            StateBackend::resolve_with(dir.path(), lookup_from(&[(ENV_BACKEND, "git")])).unwrap();
         assert_eq!(backend.label(), "local");
     }
 
     #[test]
     fn broker_selected_without_settings_is_a_hard_error() {
         let dir = tempfile::tempdir().unwrap();
-        let error = StateBackend::resolve_with(
-            dir.path(),
-            lookup_from(&[(ENV_BACKEND, "broker")]),
-        )
-        .unwrap_err();
+        let error = StateBackend::resolve_with(dir.path(), lookup_from(&[(ENV_BACKEND, "broker")]))
+            .unwrap_err();
         assert_eq!(error.code(), BrokerErrorCode::Configuration);
         assert!(error.message().contains(ENV_BROKER_URL));
     }
@@ -706,9 +698,8 @@ mod tests {
     #[test]
     fn unknown_backend_name_is_rejected() {
         let dir = tempfile::tempdir().unwrap();
-        let error =
-            StateBackend::resolve_with(dir.path(), lookup_from(&[(ENV_BACKEND, "sqlite")]))
-                .unwrap_err();
+        let error = StateBackend::resolve_with(dir.path(), lookup_from(&[(ENV_BACKEND, "sqlite")]))
+            .unwrap_err();
         assert!(error.message().contains("unknown state backend"));
     }
 }

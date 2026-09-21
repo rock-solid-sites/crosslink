@@ -93,13 +93,8 @@ impl StubBroker {
     }
 
     fn config(&self) -> StateBrokerConfig {
-        StateBrokerConfig::new(
-            self.base_url(),
-            UUID,
-            TOKEN,
-            Duration::from_secs(5),
-        )
-        .expect("stub config")
+        StateBrokerConfig::new(self.base_url(), UUID, TOKEN, Duration::from_secs(5))
+            .expect("stub config")
     }
 
     fn client(&self) -> StateBrokerClient {
@@ -263,17 +258,15 @@ fn read_request(stream: &mut TcpStream) -> Option<StubRequest> {
     })
 }
 
-fn route(
-    request: &StubRequest,
-    state: &Arc<Mutex<StubState>>,
-) -> (u16, serde_json::Value) {
+fn route(request: &StubRequest, state: &Arc<Mutex<StubState>>) -> (u16, serde_json::Value) {
     let mut guard = match state.lock() {
         Ok(guard) => guard,
         Err(poisoned) => poisoned.into_inner(),
     };
-    guard
-        .requests
-        .push(format!("{} {}?{:?}", request.method, request.path, request.query));
+    guard.requests.push(format!(
+        "{} {}?{:?}",
+        request.method, request.path, request.query
+    ));
 
     if guard.broken_next_response {
         guard.broken_next_response = false;
@@ -281,19 +274,26 @@ fn route(
     }
 
     if request.path == "/v1/health" {
-        return ok("health", serde_json::json!({
-            "status": "ok",
-            "service": "crosslink-state-broker",
-            "version": "0.1.0-test",
-            "time": "2026-09-21T00:00:00.000Z",
-        }));
+        return ok(
+            "health",
+            serde_json::json!({
+                "status": "ok",
+                "service": "crosslink-state-broker",
+                "version": "0.1.0-test",
+                "time": "2026-09-21T00:00:00.000Z",
+            }),
+        );
     }
 
     let expected_auth = format!("Bearer {}", guard.token);
     if request.headers.get("authorization") != Some(&expected_auth) {
         return (
             401,
-            error_envelope("unauthorized", "missing or invalid broker credential", false),
+            error_envelope(
+                "unauthorized",
+                "missing or invalid broker credential",
+                false,
+            ),
         );
     }
 
@@ -316,11 +316,14 @@ fn route(
     }
 
     if request.path == "/v1/whoami" {
-        return ok("whoami", serde_json::json!({
-            "token_id": "token-1",
-            "project_uuid": guard.project_uuid,
-            "scopes": ["state:read", "state:write"],
-        }));
+        return ok(
+            "whoami",
+            serde_json::json!({
+                "token_id": "token-1",
+                "project_uuid": guard.project_uuid,
+                "scopes": ["state:read", "state:write"],
+            }),
+        );
     }
 
     let prefix = format!("/v1/projects/{}/state", guard.project_uuid);
@@ -331,12 +334,15 @@ fn route(
 
     if guard.unknown_error_code {
         guard.unknown_error_code = false;
-        return (500, serde_json::json!({
-            "ok": false,
-            "operation": "test",
-            "request_id": "stub",
-            "error": {"code": "surprise_code", "message": "unknown code", "retryable": false},
-        }));
+        return (
+            500,
+            serde_json::json!({
+                "ok": false,
+                "operation": "test",
+                "request_id": "stub",
+                "error": {"code": "surprise_code", "message": "unknown code", "retryable": false},
+            }),
+        );
     }
 
     match tail {
@@ -351,7 +357,10 @@ fn route(
                 return (400, error_envelope("invalid_input", "path required", false));
             };
             let Some(bytes) = guard.files.get(path) else {
-                return (404, error_envelope("not_found", "state file not found", false));
+                return (
+                    404,
+                    error_envelope("not_found", "state file not found", false),
+                );
             };
             let head = guard.head.clone().unwrap_or_default();
             if let Some(requested) = request.query.get("ref") {
@@ -363,19 +372,25 @@ fn route(
                     return (404, error_envelope("not_found", "no such ref", false));
                 }
             }
-            ok("state.hydrate", serde_json::json!({
-                "path": path,
-                "ref": request.query.get("ref").cloned().unwrap_or_else(|| state_ref(&guard.project_uuid)),
-                "commit": head,
-                "blob_sha": pseudo_sha(bytes),
-                "sha256": sha256_hex(bytes),
-                "size": bytes.len(),
-                "content_base64": base64_encode(bytes),
-            }))
+            ok(
+                "state.hydrate",
+                serde_json::json!({
+                    "path": path,
+                    "ref": request.query.get("ref").cloned().unwrap_or_else(|| state_ref(&guard.project_uuid)),
+                    "commit": head,
+                    "blob_sha": pseudo_sha(bytes),
+                    "sha256": sha256_hex(bytes),
+                    "size": bytes.len(),
+                    "content_base64": base64_encode(bytes),
+                }),
+            )
         }
         "/verify" => {
             let Some(commit) = request.query.get("commit") else {
-                return (400, error_envelope("invalid_input", "commit required", false));
+                return (
+                    400,
+                    error_envelope("invalid_input", "commit required", false),
+                );
             };
             if Some(commit.as_str()) != guard.head.as_deref() {
                 return (404, error_envelope("not_found", "unknown commit", false));
@@ -404,20 +419,29 @@ fn route(
                     }),
                 })
                 .collect();
-            ok("state.verify", serde_json::json!({
-                "commit": commit,
-                "entries": entries,
-            }))
+            ok(
+                "state.verify",
+                serde_json::json!({
+                    "commit": commit,
+                    "entries": entries,
+                }),
+            )
         }
         "/commit" => {
             if request.method != "POST" {
-                return (405, error_envelope("method_not_allowed", "POST only", false));
+                return (
+                    405,
+                    error_envelope("method_not_allowed", "POST only", false),
+                );
             }
             let body: serde_json::Value = match serde_json::from_slice(&request.body) {
                 Ok(value) => value,
                 Err(_) => return (400, error_envelope("invalid_input", "bad JSON body", false)),
             };
-            let expected_head = body.get("expected_head").cloned().unwrap_or(serde_json::Value::Null);
+            let expected_head = body
+                .get("expected_head")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null);
             let observed = guard
                 .head
                 .clone()
@@ -449,17 +473,31 @@ fn route(
                     }),
                 );
             }
-            let message = body.get("message").and_then(|v| v.as_str()).unwrap_or_default();
+            let message = body
+                .get("message")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default();
             let op_id = body.get("op_id").and_then(|v| v.as_str());
-            let files = body.get("files").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+            let files = body
+                .get("files")
+                .and_then(|v| v.as_array())
+                .cloned()
+                .unwrap_or_default();
             if files.is_empty() {
-                return (400, error_envelope("invalid_input", "files required", false));
+                return (
+                    400,
+                    error_envelope("invalid_input", "files required", false),
+                );
             }
 
             let previous_head = guard.head.clone();
             let mut verified = Vec::new();
             for file in &files {
-                let path = file.get("path").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+                let path = file
+                    .get("path")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string();
                 let content = file
                     .get("content_base64")
                     .and_then(|v| v.as_str())
@@ -486,16 +524,19 @@ fn route(
             let full_message = format!("{}\n\n{}\n", message.trim_end(), trailers.join("\n"));
             guard.head = Some(commit.clone());
             guard.message = Some(full_message.clone());
-            ok("state.commit", serde_json::json!({
-                "ref": state_ref(&guard.project_uuid),
-                "commit": commit,
-                "previous_head": previous_head,
-                "head_after": commit,
-                "message": full_message,
-                "op_id": op_id,
-                "files": verified,
-                "verified": true,
-            }))
+            ok(
+                "state.commit",
+                serde_json::json!({
+                    "ref": state_ref(&guard.project_uuid),
+                    "commit": commit,
+                    "previous_head": previous_head,
+                    "head_after": commit,
+                    "message": full_message,
+                    "op_id": op_id,
+                    "files": verified,
+                    "verified": true,
+                }),
+            )
         }
         _ => (404, error_envelope("not_found", "unknown operation", false)),
     }
@@ -632,7 +673,11 @@ fn percent_decode(value: &str) -> String {
                 continue;
             }
         }
-        out.push(if bytes[index] == b'+' { b' ' } else { bytes[index] });
+        out.push(if bytes[index] == b'+' {
+            b' '
+        } else {
+            bytes[index]
+        });
         index += 1;
     }
     String::from_utf8_lossy(&out).to_string()
@@ -645,7 +690,10 @@ fn state_and_whoami_round_trip_through_real_http() {
     let broker = StubBroker::start();
     broker.seed(vec![
         ("issues/abc.json", br#"{"title":"one"}"#.to_vec()),
-        ("meta/counters.json", br#"{"next_display_id":2,"next_comment_id":1}"#.to_vec()),
+        (
+            "meta/counters.json",
+            br#"{"next_display_id":2,"next_comment_id":1}"#.to_vec(),
+        ),
     ]);
     let client = broker.client();
 
@@ -665,8 +713,7 @@ fn state_and_whoami_round_trip_through_real_http() {
     assert!(state.state.exists);
     assert_eq!(state.state.entries.len(), 2);
     assert_eq!(
-        state.state.entries[0].path,
-        "issues/abc.json",
+        state.state.entries[0].path, "issues/abc.json",
         "inventory is path-sorted"
     );
     assert!(state.baseline.matches);
@@ -679,7 +726,10 @@ fn blob_read_verifies_digests_and_hydrates_a_disposable_projection() {
     let broker = StubBroker::start();
     broker.seed(vec![
         ("issues/abc.json", br#"{"title":"one"}"#.to_vec()),
-        ("meta/counters.json", br#"{"next_display_id":2,"next_comment_id":1}"#.to_vec()),
+        (
+            "meta/counters.json",
+            br#"{"next_display_id":2,"next_comment_id":1}"#.to_vec(),
+        ),
     ]);
     let client = broker.client();
 
@@ -730,7 +780,10 @@ fn commit_bootstrap_conflict_and_reconciled_retry() {
         .expect("bootstrap commit");
     assert!(first.verified);
     assert_eq!(first.previous_head, None);
-    assert_eq!(broker.file("checkpoints/first.json").unwrap(), br#"{"phase":"first"}"#);
+    assert_eq!(
+        broker.file("checkpoints/first.json").unwrap(),
+        br#"{"phase":"first"}"#
+    );
     let first_head = first.commit.clone();
 
     // Stale CAS: caller still believes the ref does not exist.
@@ -744,7 +797,10 @@ fn commit_bootstrap_conflict_and_reconciled_retry() {
         ))
         .unwrap_err();
     assert!(error.is_stale_state());
-    assert_eq!(error.code(), crosslink::state_broker::BrokerErrorCode::StaleState);
+    assert_eq!(
+        error.code(),
+        crosslink::state_broker::BrokerErrorCode::StaleState
+    );
     assert_eq!(error.http_status(), Some(409));
     let observed = error
         .details()
@@ -752,7 +808,11 @@ fn commit_bootstrap_conflict_and_reconciled_retry() {
         .and_then(|value| value.as_str());
     assert_eq!(observed, Some(first_head.as_str()));
     assert_eq!(broker.head().as_deref(), Some(first_head.as_str()));
-    assert_eq!(broker.file("checkpoints/second.json"), None, "nothing written");
+    assert_eq!(
+        broker.file("checkpoints/second.json"),
+        None,
+        "nothing written"
+    );
 
     // Reconciled CAS: re-read the head and retry through commit_cas.
     let request = CommitRequest::single(
@@ -785,7 +845,11 @@ fn commit_bootstrap_conflict_and_reconciled_retry() {
         .expect("idempotent replay");
     assert!(replay.already_applied);
     assert!(replay.outcome.verified);
-    assert_eq!(broker.head(), before_replay, "replay must not move the head");
+    assert_eq!(
+        broker.head(),
+        before_replay,
+        "replay must not move the head"
+    );
 }
 
 #[test]
@@ -799,9 +863,15 @@ fn token_never_leaks_into_errors_logs_or_urls() {
     let config = broker.config();
     broker.set_echo_token_next();
     let error = client.read_state().unwrap_err();
-    assert_eq!(error.code(), crosslink::state_broker::BrokerErrorCode::UpstreamError);
+    assert_eq!(
+        error.code(),
+        crosslink::state_broker::BrokerErrorCode::UpstreamError
+    );
     let rendered = format!("{error} {error:?}");
-    assert!(!rendered.contains(TOKEN), "error must be redacted: {rendered}");
+    assert!(
+        !rendered.contains(TOKEN),
+        "error must be redacted: {rendered}"
+    );
     assert!(error.message().contains("[redacted]"));
     assert!(!error.details().unwrap().to_string().contains(TOKEN));
 
@@ -812,7 +882,10 @@ fn token_never_leaks_into_errors_logs_or_urls() {
     // Real requests carry the token only in the Authorization header, never in
     // the request target recorded by the stub.
     for line in broker.request_lines() {
-        assert!(!line.contains(TOKEN), "token must not appear in request URLs: {line}");
+        assert!(
+            !line.contains(TOKEN),
+            "token must not appear in request URLs: {line}"
+        );
     }
 
     // A wrong token produces the typed unauthorized failure.
@@ -827,7 +900,10 @@ fn token_never_leaks_into_errors_logs_or_urls() {
     )
     .unwrap();
     let error = wrong.whoami().unwrap_err();
-    assert_eq!(error.code(), crosslink::state_broker::BrokerErrorCode::Unauthorized);
+    assert_eq!(
+        error.code(),
+        crosslink::state_broker::BrokerErrorCode::Unauthorized
+    );
     assert_eq!(error.http_status(), Some(401));
 }
 
@@ -840,7 +916,10 @@ fn protocol_violations_are_typed_and_local_validation_skips_the_network() {
 
     // Local rejection: no request must be sent.
     let error = client.read_blob("../escape", None).unwrap_err();
-    assert_eq!(error.code(), crosslink::state_broker::BrokerErrorCode::InvalidInput);
+    assert_eq!(
+        error.code(),
+        crosslink::state_broker::BrokerErrorCode::InvalidInput
+    );
     let error = client
         .commit(&CommitRequest::single(
             "a.json",
@@ -850,18 +929,31 @@ fn protocol_violations_are_typed_and_local_validation_skips_the_network() {
             None,
         ))
         .unwrap_err();
-    assert_eq!(error.code(), crosslink::state_broker::BrokerErrorCode::InvalidInput);
-    assert_eq!(broker.request_lines().len(), before, "no network on local rejection");
+    assert_eq!(
+        error.code(),
+        crosslink::state_broker::BrokerErrorCode::InvalidInput
+    );
+    assert_eq!(
+        broker.request_lines().len(),
+        before,
+        "no network on local rejection"
+    );
 
     // Non-envelope response → protocol error.
     broker.set_broken_next_response();
     let error = client.read_state().unwrap_err();
-    assert_eq!(error.code(), crosslink::state_broker::BrokerErrorCode::Protocol);
+    assert_eq!(
+        error.code(),
+        crosslink::state_broker::BrokerErrorCode::Protocol
+    );
 
     // Unknown error code → protocol error (never silently mapped).
     broker.set_unknown_error_code();
     let error = client.read_state().unwrap_err();
-    assert_eq!(error.code(), crosslink::state_broker::BrokerErrorCode::Protocol);
+    assert_eq!(
+        error.code(),
+        crosslink::state_broker::BrokerErrorCode::Protocol
+    );
     assert!(error.message().contains("surprise_code"));
 }
 
@@ -874,5 +966,8 @@ fn non_loopback_plain_http_is_refused_by_config() {
         Duration::from_secs(5),
     )
     .unwrap_err();
-    assert_eq!(error.code(), crosslink::state_broker::BrokerErrorCode::Configuration);
+    assert_eq!(
+        error.code(),
+        crosslink::state_broker::BrokerErrorCode::Configuration
+    );
 }

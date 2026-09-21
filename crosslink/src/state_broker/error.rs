@@ -130,7 +130,10 @@ impl BrokerErrorCode {
     /// a blind retry of a write is never allowed.
     #[must_use]
     pub const fn default_retryable(self) -> bool {
-        matches!(self, Self::StaleState | Self::Transport | Self::UpstreamError)
+        matches!(
+            self,
+            Self::StaleState | Self::Transport | Self::UpstreamError
+        )
     }
 }
 
@@ -154,7 +157,7 @@ pub struct StateBrokerError {
 
 impl StateBrokerError {
     /// Typed error from a broker failure envelope (already redacted).
-    pub(crate) fn from_envelope(
+    pub(crate) const fn from_envelope(
         code: BrokerErrorCode,
         message: String,
         retryable: bool,
@@ -213,7 +216,7 @@ impl StateBrokerError {
         Self::client(BrokerErrorCode::LocalIo, message.into())
     }
 
-    fn client(code: BrokerErrorCode, message: String) -> Self {
+    const fn client(code: BrokerErrorCode, message: String) -> Self {
         Self {
             code,
             message,
@@ -322,7 +325,9 @@ pub fn redact_secret(text: &str, secret: &str) -> String {
 pub(crate) fn redact_value(value: &Value, secret: &str) -> Value {
     match value {
         Value::String(s) => Value::String(redact_secret(s, secret)),
-        Value::Array(items) => Value::Array(items.iter().map(|v| redact_value(v, secret)).collect()),
+        Value::Array(items) => {
+            Value::Array(items.iter().map(|v| redact_value(v, secret)).collect())
+        }
         Value::Object(map) => Value::Object(
             map.iter()
                 .map(|(k, v)| (k.clone(), redact_value(v, secret)))
@@ -391,9 +396,8 @@ mod tests {
 
     #[test]
     fn display_never_contains_credentials() {
-        let error = StateBrokerError::configuration(
-            "set CROSSLINK_STATE_BROKER_TOKEN (value not shown)",
-        );
+        let error =
+            StateBrokerError::configuration("set CROSSLINK_STATE_BROKER_TOKEN (value not shown)");
         let rendered = format!("{error} {error:?}");
         assert!(rendered.contains("configuration"));
         assert!(!rendered.contains("Bearer"));

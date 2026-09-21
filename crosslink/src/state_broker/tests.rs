@@ -19,7 +19,10 @@ fn bootstrap_mock() -> MockStateTransport {
     MockStateTransport::with_files(
         UUID,
         [
-            ("meta/counters.json", br#"{"next_display_id":2,"next_comment_id":1}"#.to_vec()),
+            (
+                "meta/counters.json",
+                br#"{"next_display_id":2,"next_comment_id":1}"#.to_vec(),
+            ),
             ("checkpoints/first.json", br#"{"ok":true}"#.to_vec()),
         ],
     )

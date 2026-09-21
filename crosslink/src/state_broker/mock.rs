@@ -78,7 +78,8 @@ impl MockStateTransport {
             let paths: Vec<String> = state.files.keys().cloned().collect();
             let commit = next_commit_sha(&state, &paths);
             state.head = Some(commit);
-            state.message = Some("mock: bootstrap\n\nProject-UUID: mock\nBroker: mock\n".to_string());
+            state.message =
+                Some("mock: bootstrap\n\nProject-UUID: mock\nBroker: mock\n".to_string());
         }
         mock
     }
@@ -261,22 +262,22 @@ impl ProjectStateTransport for MockStateTransport {
         let mut entries = Vec::with_capacity(paths.len());
         for path in paths {
             validate_logical_path(path)?;
-            let entry = match state.files.get(path) {
-                Some(bytes) => VerifiedEntry {
-                    path: path.clone(),
-                    present: true,
-                    blob_sha: Some(pseudo_git_sha(bytes)),
-                    sha256: Some(sha256_hex(bytes)),
-                    size: Some(bytes.len() as u64),
-                },
-                None => VerifiedEntry {
+            let entry = state.files.get(path).map_or_else(
+                || VerifiedEntry {
                     path: path.clone(),
                     present: false,
                     blob_sha: None,
                     sha256: None,
                     size: None,
                 },
-            };
+                |bytes| VerifiedEntry {
+                    path: path.clone(),
+                    present: true,
+                    blob_sha: Some(pseudo_git_sha(bytes)),
+                    sha256: Some(sha256_hex(bytes)),
+                    size: Some(bytes.len() as u64),
+                },
+            );
             entries.push(entry);
         }
         Ok(entries)
@@ -310,7 +311,11 @@ impl ProjectStateTransport for MockStateTransport {
         state.counter += 1;
         let paths: Vec<String> = request.files.iter().map(|file| file.path.clone()).collect();
         let commit = next_commit_sha(&state, &paths);
-        let message = build_message(&state.project_uuid, &request.message, request.op_id.as_deref());
+        let message = build_message(
+            &state.project_uuid,
+            &request.message,
+            request.op_id.as_deref(),
+        );
 
         let mut files = Vec::with_capacity(request.files.len());
         for file in &request.files {
@@ -372,7 +377,10 @@ mod tests {
     #[test]
     fn bootstrap_then_commit_moves_head_with_trailers() {
         let mock = MockStateTransport::new(UUID);
-        assert_eq!(mock.state_ref(), format!("refs/heads/projects/{UUID}/state"));
+        assert_eq!(
+            mock.state_ref(),
+            format!("refs/heads/projects/{UUID}/state")
+        );
         assert!(mock.head().is_none());
         assert_eq!(mock.commit_count(), 0);
 
@@ -389,7 +397,10 @@ mod tests {
         assert_eq!(outcome.head_after.as_deref(), Some(outcome.commit.as_str()));
         assert!(message_records_op(&outcome.message, "op-1"));
         assert_eq!(mock.commit_count(), 1);
-        assert_eq!(mock.file_bytes("checkpoints/first.json").unwrap(), br#"{"ok":true}"#);
+        assert_eq!(
+            mock.file_bytes("checkpoints/first.json").unwrap(),
+            br#"{"ok":true}"#
+        );
     }
 
     #[test]
@@ -420,7 +431,10 @@ mod tests {
             .unwrap();
         assert_eq!(entries.len(), 2);
         assert!(entries[0].is_verified());
-        assert_eq!(entries[0].sha256.as_deref(), Some(sha256_hex(b"one").as_str()));
+        assert_eq!(
+            entries[0].sha256.as_deref(),
+            Some(sha256_hex(b"one").as_str())
+        );
         assert!(!entries[1].present);
         assert!(!entries[1].is_verified());
     }

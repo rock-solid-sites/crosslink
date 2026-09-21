@@ -201,7 +201,9 @@ impl StateBlob {
     pub fn bytes(&self) -> Result<Vec<u8>, StateBrokerError> {
         let decoded = base64::engine::general_purpose::STANDARD
             .decode(self.content_base64.as_bytes())
-            .map_err(|e| StateBrokerError::protocol(format!("blob content is not valid base64: {e}")))?;
+            .map_err(|e| {
+                StateBrokerError::protocol(format!("blob content is not valid base64: {e}"))
+            })?;
         if decoded.len() as u64 != self.size {
             return Err(StateBrokerError::protocol(format!(
                 "blob size mismatch for {}: envelope says {}, decoded {}",
@@ -262,7 +264,7 @@ pub struct VerifiedEntry {
 impl VerifiedEntry {
     /// Whether the entry exists and carries digests.
     #[must_use]
-    pub fn is_verified(&self) -> bool {
+    pub const fn is_verified(&self) -> bool {
         self.present && self.sha256.is_some()
     }
 }
@@ -478,9 +480,14 @@ impl StateBrokerClient {
     pub fn new(config: StateBrokerConfig) -> Result<Self, StateBrokerError> {
         let http = reqwest::blocking::Client::builder()
             .timeout(config.timeout())
-            .user_agent(concat!("crosslink-state-broker-client/", env!("CARGO_PKG_VERSION")))
+            .user_agent(concat!(
+                "crosslink-state-broker-client/",
+                env!("CARGO_PKG_VERSION")
+            ))
             .build()
-            .map_err(|e| StateBrokerError::configuration(format!("HTTP client init failed: {e}")))?;
+            .map_err(|e| {
+                StateBrokerError::configuration(format!("HTTP client init failed: {e}"))
+            })?;
         Ok(Self { config, http })
     }
 
@@ -571,10 +578,7 @@ impl StateBrokerClient {
         }
         self.get(
             &format!("{}/verify", self.state_url()),
-            &[
-                ("commit", commit.to_string()),
-                ("paths", paths.join(",")),
-            ],
+            &[("commit", commit.to_string()), ("paths", paths.join(","))],
         )
     }
 
@@ -602,16 +606,19 @@ impl StateBrokerClient {
                 .iter()
                 .map(|file| CommitFileBody {
                     path: &file.path,
-                    content_base64: base64::engine::general_purpose::STANDARD
-                        .encode(&file.content),
+                    content_base64: base64::engine::general_purpose::STANDARD.encode(&file.content),
                 })
                 .collect(),
         };
         let body = serde_json::to_value(&body).map_err(|e| {
             StateBrokerError::invalid_input(format!("commit body serialization failed: {e}"))
         })?;
-        let outcome: CommitOutcome =
-            self.send(reqwest::Method::POST, &format!("{}/commit", self.state_url()), &[], Some(&body))?;
+        let outcome: CommitOutcome = self.send(
+            reqwest::Method::POST,
+            &format!("{}/commit", self.state_url()),
+            &[],
+            Some(&body),
+        )?;
         if !outcome.verified {
             return Err(StateBrokerError::protocol(format!(
                 "broker reported verified=false for committed path(s) at {}; treat as unverified",
@@ -659,10 +666,9 @@ impl StateBrokerClient {
             Ok(response) => response,
             Err(error) => {
                 let retryable = error.is_timeout() || error.is_connect();
-                let message = self.config.redact(&format!(
-                    "request to {} failed: {error}",
-                    host_label(url)
-                ));
+                let message = self
+                    .config
+                    .redact(&format!("request to {} failed: {error}", host_label(url)));
                 return Err(StateBrokerError::transport(message, retryable));
             }
         };
@@ -715,7 +721,10 @@ impl StateBrokerClient {
             code,
             self.config.redact(&error.message),
             error.retryable || code.default_retryable(),
-            error.details.as_ref().map(|d| redact_value(d, self.config.token())),
+            error
+                .details
+                .as_ref()
+                .map(|d| redact_value(d, self.config.token())),
             Some(status),
             envelope.request_id,
             envelope.operation,
@@ -725,12 +734,13 @@ impl StateBrokerClient {
 
 /// Host-only label for an error message (never the full URL).
 fn host_label(url: &str) -> String {
-    url.split_once("://")
-        .map(|(scheme, rest)| {
+    url.split_once("://").map_or_else(
+        || url.to_string(),
+        |(scheme, rest)| {
             let host = rest.split('/').next().unwrap_or(rest);
             format!("{scheme}://{host}")
-        })
-        .unwrap_or_else(|| url.to_string())
+        },
+    )
 }
 
 /// Truncate a body excerpt for error messages.

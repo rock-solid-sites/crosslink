@@ -79,5 +79,8 @@ fn live_broker_read_only_probe() {
         "registry_present": state.registry.present,
         "writes_performed": 0,
     });
-    println!("{}", serde_json::to_string_pretty(&summary).expect("summary"));
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&summary).expect("summary")
+    );
 }

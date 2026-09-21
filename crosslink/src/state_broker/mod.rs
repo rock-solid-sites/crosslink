@@ -16,7 +16,7 @@
 //!
 //! # What this module does NOT do
 //!
-//! It does not change Crosslink's existing hub v3 model, its SQLite schema, or
+//! It does not change Crosslink's existing hub v3 model, its `SQLite` schema, or
 //! its default git transport. The hub's per-agent refs, [`crate::sync`], and
 //! [`crate::hydration`] keep working exactly as before; the broker transport is
 //! an additional backend that call sites can adopt incrementally. See
@@ -26,7 +26,7 @@
 //! # Local state is disposable
 //!
 //! [`config::default_projection_dir`] names the default directory for a
-//! hydrated projection. It is a cache: SQLite and the projection can be
+//! hydrated projection. It is a cache: `SQLite` and the projection can be
 //! deleted and rebuilt from the broker at any time. The durable head always
 //! comes from [`transport::ProjectStateTransport::read_state`].
 //!
@@ -69,6 +69,5 @@ pub use error::{redact_secret, BrokerErrorCode, BrokerResult, StateBrokerError};
 pub use mock::MockStateTransport;
 #[allow(unused_imports)]
 pub use transport::{
-    message_records_op, transport_from_env, CasResolution, ProjectStateTransport,
-    ProjectionReport,
+    message_records_op, transport_from_env, CasResolution, ProjectStateTransport, ProjectionReport,
 };

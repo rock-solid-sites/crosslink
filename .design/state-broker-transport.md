@@ -325,6 +325,32 @@ failures in 15 consecutive module runs; the module passes in isolation, and its
 source is untouched here. Filed as Crosslink issue #803; the adapter's own
 tests use per-test tempdirs only.
 
+## 7.3 Clean-room panel review and decision-independent hardening
+
+A five-model clean-room panel and its synthesis (`handoffs/review-802/`) plus
+the earlier Hy3 review identified defects that do not depend on the deferred
+mapping decision. They are fixed on branch
+`fix/pp3g-802-decision-independent-hardening`, without wiring `SyncManager` and
+without deciding the mapping (now recorded in ADR-802). Finding-by-finding
+disposition and evidence: `handoffs/802-hardening.md`. Summary:
+
+- non-ASCII commit messages no longer panic client validation;
+- `commit_cas` refuses automatic same-path rebases without a per-path
+  non-overlap/equivalence proof and returns explicit `CasResolution` verdicts;
+- `verified: false` (overall or per file) and ambiguous writes
+  (timeout/response/upstream) are typed `reconcile_required` and are never
+  ordinary success or blind retries;
+- projections carry backend/project/head/digest markers with a fail-closed
+  `verify_projection` gate; interrupted hydration cannot look complete;
+- a corrupt `hook-config.json` that may select the broker fails hard;
+- blob reads are cross-checked against the pinned inventory;
+- mock and stub now model commit history, historical reads, and broker limits
+  faithfully;
+- broker-legal Windows-reserved paths are representable (reversible escape)
+  instead of un-hydratable;
+- unused public surface removed (`BrokerErrorCode::ALL`,
+  `StateBackend::into_broker`, `transport_from_env`, `StateBlob::text`).
+
 ## 8. Next step: live verification (after the Codex Cloud durability experiment passes)
 
 1. Operator places the broker token on the machine, e.g.

@@ -105,7 +105,13 @@ pub fn validate_message(message: &str) -> Result<(), StateBrokerError> {
             "commit message must be at most {MAX_MESSAGE_LENGTH} characters"
         )));
     }
-    if message.chars().any(char::is_control) {
+    // Exact broker rule: reject C0 controls and DEL only (`state.ts`:
+    // `/[\u0000-\u001F\u007F]/`). C1 controls are accepted by the broker and
+    // must not be rejected locally.
+    if message
+        .chars()
+        .any(|c| c == '\u{7f}' || ('\u{0}'..='\u{1f}').contains(&c))
+    {
         return Err(invalid(
             "commit message must be a single line with no control characters",
         ));
@@ -271,6 +277,9 @@ mod tests {
         assert!(validate_message("   ").is_err());
         assert!(validate_message("two\nlines").is_err());
         assert!(validate_message("tab\there").is_err());
+        // Exact broker rule: C1 controls are accepted (rejected only by
+        // `char::is_control`, which is why this test exists).
+        validate_message("c1 \u{85} accepted").unwrap();
         assert!(validate_message("Project-UUID: spoof").is_err());
         assert!(validate_message("broker-op: spoof").is_err());
         assert!(validate_message(&"x".repeat(MAX_MESSAGE_LENGTH + 1)).is_err());

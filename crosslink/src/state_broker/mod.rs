@@ -33,9 +33,10 @@
 //! # Secret safety
 //!
 //! The bearer token lives in [`config::SecretToken`], which redacts itself in
-//! `Debug` output and implements neither `Display` nor `Serialize`. Error
-//! strings are redacted before construction. The token is sent only in the
-//! `Authorization` header, only to the configured broker host.
+//! `Debug` output and implements neither `Display` nor `Serialize`; its value
+//! is reachable only from crate-internal code. Error strings are redacted
+//! before construction. The token is sent only in the `Authorization` header,
+//! only to the configured broker host.
 
 pub mod client;
 pub mod config;

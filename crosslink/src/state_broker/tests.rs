@@ -140,6 +140,52 @@ fn commit_cas_detects_our_own_already_landed_write() {
     assert_eq!(mock.commit_count(), 1, "no second write was issued");
 }
 
+/// Reconciliation must not vouch for content it did not write: if the head
+/// records our op id but carries a different payload (a reused op id or a later
+/// overwrite), `already_applied` must report `verified: false`.
+#[test]
+fn commit_cas_does_not_vouch_for_content_it_did_not_write() {
+    let mock = bootstrap_mock();
+    let base_head = mock.head().unwrap();
+
+    // Our operation lands first...
+    mock.commit(&CommitRequest::single(
+        "checkpoints/ours.json",
+        br#"{"v":1}"#.to_vec(),
+        Some(base_head.clone()),
+        "checkpoint: ours",
+        Some("op-ours".to_string()),
+    ))
+    .expect("direct commit");
+    // ...then a later writer reuses the same op id and overwrites the payload.
+    mock.inject_competing_commit(
+        vec![("checkpoints/ours.json", br#"{"v":2}"#.to_vec())],
+        "reuse",
+        Some("op-ours"),
+    );
+
+    let stale_call = CommitRequest::single(
+        "checkpoints/ours.json",
+        br#"{"v":1}"#.to_vec(),
+        Some(base_head),
+        "checkpoint: ours",
+        Some("op-ours".to_string()),
+    );
+    let resolution = mock.commit_cas(&stale_call, 1).expect("reconcile");
+    assert!(resolution.already_applied);
+    assert!(
+        !resolution.outcome.verified,
+        "a content mismatch must not be reported as a verified write"
+    );
+    assert!(resolution.outcome.files.iter().all(|file| !file.verified));
+    assert_eq!(mock.commit_count(), 1, "no second write was issued");
+    assert_eq!(
+        mock.file_bytes("checkpoints/ours.json").unwrap(),
+        br#"{"v":2}"#,
+        "the other writer's payload is untouched"
+    );
+}
+
 #[test]
 fn commit_cas_exhausts_retries_with_a_typed_stale_error() {
     let mock = bootstrap_mock();

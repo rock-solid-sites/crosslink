@@ -5,7 +5,8 @@
 //! The bearer token is read from the environment (or from a file whose *path*
 //! is configured) and is never written back to any Crosslink file. It is
 //! wrapped in [`SecretToken`], which redacts itself in `Debug` output and
-//! deliberately implements neither `Display` nor `Serialize`.
+//! deliberately implements neither `Display` nor `Serialize`; its value is
+//! reachable only from crate-internal code (the HTTP client and redaction).
 //!
 //! # Backend selection
 //!
@@ -74,9 +75,11 @@ impl SecretToken {
         Self(value.into())
     }
 
-    /// Borrow the token value. Only the HTTP client may call this.
+    /// Borrow the token value. Crate-internal only: the HTTP client attaches
+    /// it and [`StateBrokerConfig::redact`] needs it; nothing public can render
+    /// it.
     #[must_use]
-    pub fn expose(&self) -> &str {
+    pub(crate) fn expose(&self) -> &str {
         &self.0
     }
 

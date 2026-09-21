@@ -260,16 +260,41 @@ pub trait ProjectStateTransport {
                     let head = state.state.head.clone();
                     if let Some(head) = &head {
                         if message_records_op(&head.message, &op_id) {
-                            let paths = request.paths();
-                            let entries = self.verify(&head.commit, &paths)?;
+                            // The op-id trailer says this head came from our
+                            // operation, but only a content comparison proves
+                            // the head still carries the payload we intended:
+                            // a reused op id (or any later overwrite) must not
+                            // be reported as a verified write.
+                            let intended: std::collections::HashMap<&str, (String, u64)> = request
+                                .files
+                                .iter()
+                                .map(|file| {
+                                    (
+                                        file.path.as_str(),
+                                        (
+                                            super::digest::sha256_hex(&file.content),
+                                            file.content.len() as u64,
+                                        ),
+                                    )
+                                })
+                                .collect();
+                            let entries = self.verify(&head.commit, &request.paths())?;
                             let files: Vec<VerifiedFile> = entries
                                 .into_iter()
-                                .map(|entry| VerifiedFile {
-                                    path: entry.path,
-                                    blob_sha: entry.blob_sha,
-                                    sha256: entry.sha256,
-                                    size: entry.size,
-                                    verified: entry.present,
+                                .map(|entry| {
+                                    let verified = intended.get(entry.path.as_str()).is_some_and(
+                                        |(expected_sha, expected_size)| {
+                                            entry.sha256.as_deref() == Some(expected_sha.as_str())
+                                                && entry.size == Some(*expected_size)
+                                        },
+                                    );
+                                    VerifiedFile {
+                                        path: entry.path,
+                                        blob_sha: entry.blob_sha,
+                                        sha256: entry.sha256,
+                                        size: entry.size,
+                                        verified,
+                                    }
                                 })
                                 .collect();
                             let verified = files.iter().all(|file| file.verified);

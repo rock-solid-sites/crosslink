@@ -33,6 +33,9 @@ struct StubState {
     head: Option<String>,
     message: Option<String>,
     files: BTreeMap<String, Vec<u8>>,
+    /// Commit -> file snapshot, so historical commits stay readable the way the
+    /// real broker's tree reads do.
+    history: BTreeMap<String, BTreeMap<String, Vec<u8>>>,
     counter: u64,
     requests: Vec<String>,
     /// Force the next state/commit response to be a non-envelope body.
@@ -62,6 +65,7 @@ impl StubBroker {
             head: None,
             message: None,
             files: BTreeMap::new(),
+            history: BTreeMap::new(),
             counter: 0,
             requests: Vec::new(),
             broken_next_response: false,
@@ -120,8 +124,10 @@ impl StubBroker {
         }
         state.counter += 1;
         let head = stub_commit_sha(&state, &[]);
-        state.head = Some(head);
+        state.head = Some(head.clone());
         state.message = Some("seed\n\nProject-UUID: stub\nBroker: stub\n".to_string());
+        let snapshot = state.files.clone();
+        state.history.insert(head, snapshot);
     }
 
     fn set_broken_next_response(&self) {
@@ -385,27 +391,36 @@ fn route(request: &StubRequest, state: &Arc<Mutex<StubState>>) -> (u16, serde_js
             let Some(path) = request.query.get("path") else {
                 return (400, error_envelope("invalid_input", "path required", false));
             };
-            let Some(bytes) = guard.files.get(path) else {
+            if !stub_path_ok(path) {
+                return (400, error_envelope("invalid_input", "invalid path", false));
+            }
+            let head = guard.head.clone().unwrap_or_default();
+            let requested = request.query.get("ref").cloned();
+            let snapshot = match requested.as_deref() {
+                None => guard.history.get(&head),
+                Some(reference)
+                    if reference == state_ref(&guard.project_uuid)
+                        || reference == state_branch(&guard.project_uuid)
+                        || reference == "state" =>
+                {
+                    guard.history.get(&head)
+                }
+                Some(commit) => guard.history.get(commit),
+            };
+            let Some(snapshot) = snapshot else {
+                return (404, error_envelope("not_found", "no such ref", false));
+            };
+            let Some(bytes) = snapshot.get(path) else {
                 return (
                     404,
                     error_envelope("not_found", "state file not found", false),
                 );
             };
-            let head = guard.head.clone().unwrap_or_default();
-            if let Some(requested) = request.query.get("ref") {
-                if requested != &head
-                    && requested != &state_ref(&guard.project_uuid)
-                    && requested != "state"
-                    && requested != &state_branch(&guard.project_uuid)
-                {
-                    return (404, error_envelope("not_found", "no such ref", false));
-                }
-            }
             ok(
                 "state.hydrate",
                 serde_json::json!({
                     "path": path,
-                    "ref": request.query.get("ref").cloned().unwrap_or_else(|| state_ref(&guard.project_uuid)),
+                    "ref": requested.unwrap_or_else(|| state_ref(&guard.project_uuid)),
                     "commit": head,
                     "blob_sha": pseudo_sha(bytes),
                     "sha256": sha256_hex(bytes),
@@ -421,17 +436,38 @@ fn route(request: &StubRequest, state: &Arc<Mutex<StubState>>) -> (u16, serde_js
                     error_envelope("invalid_input", "commit required", false),
                 );
             };
-            if Some(commit.as_str()) != guard.head.as_deref() {
-                return (404, error_envelope("not_found", "unknown commit", false));
+            if !stub_sha_ok(commit) {
+                return (
+                    400,
+                    error_envelope("invalid_input", "commit must be a sha", false),
+                );
             }
+            let Some(snapshot) = guard.history.get(commit) else {
+                return (404, error_envelope("not_found", "unknown commit", false));
+            };
             let paths = request
                 .query
                 .get("paths")
                 .map(|value| value.split(',').map(str::to_string).collect::<Vec<_>>())
                 .unwrap_or_default();
+            if paths.is_empty() || paths.len() > 32 {
+                return (
+                    400,
+                    error_envelope("invalid_input", "paths must be 1..=32", false),
+                );
+            }
+            let mut seen = std::collections::HashSet::new();
+            for path in &paths {
+                if !stub_path_ok(path) || !seen.insert(path.clone()) {
+                    return (
+                        400,
+                        error_envelope("invalid_input", "invalid or duplicate path", false),
+                    );
+                }
+            }
             let entries: Vec<serde_json::Value> = paths
                 .iter()
-                .map(|path| match guard.files.get(path) {
+                .map(|path| match snapshot.get(path) {
                     Some(bytes) => serde_json::json!({
                         "path": path,
                         "present": true,
@@ -467,6 +503,9 @@ fn route(request: &StubRequest, state: &Arc<Mutex<StubState>>) -> (u16, serde_js
                 Ok(value) => value,
                 Err(_) => return (400, error_envelope("invalid_input", "bad JSON body", false)),
             };
+            if let Err(reason) = stub_validate_commit_body(&body) {
+                return (400, error_envelope("invalid_input", &reason, false));
+            }
             let expected_head = body
                 .get("expected_head")
                 .cloned()
@@ -553,6 +592,8 @@ fn route(request: &StubRequest, state: &Arc<Mutex<StubState>>) -> (u16, serde_js
             let full_message = format!("{}\n\n{}\n", message.trim_end(), trailers.join("\n"));
             guard.head = Some(commit.clone());
             guard.message = Some(full_message.clone());
+            let snapshot = guard.files.clone();
+            guard.history.insert(commit.clone(), snapshot);
             ok(
                 "state.commit",
                 serde_json::json!({
@@ -683,6 +724,127 @@ fn base64_decode(value: &str) -> Option<Vec<u8>> {
     base64::engine::general_purpose::STANDARD.decode(value).ok()
 }
 
+// ── Independent contract rules (reimplemented here so the stub can reject what
+// the real broker rejects, independent of the client's own validators) ──────
+
+fn stub_sha_ok(value: &str) -> bool {
+    value.len() == 40
+        && value
+            .chars()
+            .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
+}
+
+fn stub_path_ok(path: &str) -> bool {
+    if path.is_empty() || path.len() > 256 || path.starts_with('/') || path.ends_with('/') {
+        return false;
+    }
+    if path.contains('\\') || path.contains('\0') {
+        return false;
+    }
+    let segments: Vec<&str> = path.split('/').collect();
+    if segments.len() > 16 {
+        return false;
+    }
+    segments.iter().all(|segment| {
+        if segment.is_empty() || segment.len() > 64 || *segment == "." || *segment == ".." {
+            return false;
+        }
+        let mut chars = segment.chars();
+        let first = chars.next().unwrap_or('!');
+        if !(first.is_ascii_alphanumeric() || first == '.' || first == '_') {
+            return false;
+        }
+        chars.all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-')
+    })
+}
+
+fn stub_message_ok(message: &str) -> bool {
+    if message.trim().is_empty() || message.chars().count() > 512 {
+        return false;
+    }
+    if message
+        .chars()
+        .any(|c| c == '\u{7f}' || ('\u{0}'..='\u{1f}').contains(&c))
+    {
+        return false;
+    }
+    let trimmed = message.trim();
+    !["Project-UUID:", "Broker:", "Broker-Op:"]
+        .iter()
+        .any(|trailer| {
+            trimmed.len() >= trailer.len() && trimmed[..trailer.len()].eq_ignore_ascii_case(trailer)
+        })
+}
+
+fn stub_op_id_ok(op_id: &str) -> bool {
+    !op_id.is_empty()
+        && op_id.len() <= 128
+        && op_id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | ':' | '-'))
+}
+
+/// Broker-equivalent commit-body validation (`state.ts::validateCommitInput`).
+fn stub_validate_commit_body(body: &serde_json::Value) -> Result<(), String> {
+    let Some(object) = body.as_object() else {
+        return Err("request body must be a JSON object".to_string());
+    };
+    if !object.contains_key("expected_head") {
+        return Err("expected_head is required (use null to expect no state ref)".to_string());
+    }
+    match object.get("expected_head") {
+        Some(serde_json::Value::Null) => {}
+        Some(serde_json::Value::String(sha)) if stub_sha_ok(sha) => {}
+        _ => return Err("expected_head must be null or a commit sha".to_string()),
+    }
+    let Some(message) = object.get("message").and_then(|value| value.as_str()) else {
+        return Err("message is required".to_string());
+    };
+    if !stub_message_ok(message) {
+        return Err("invalid message".to_string());
+    }
+    if let Some(op_id) = object.get("op_id") {
+        if !op_id.is_null() {
+            match op_id.as_str() {
+                Some(op_id) if stub_op_id_ok(op_id) => {}
+                _ => return Err("invalid op_id".to_string()),
+            }
+        }
+    }
+    let Some(files) = object.get("files").and_then(|value| value.as_array()) else {
+        return Err("files must be an array".to_string());
+    };
+    if files.is_empty() || files.len() > 32 {
+        return Err("files must contain 1-32 entries".to_string());
+    }
+    let mut seen = std::collections::HashSet::new();
+    let mut total: usize = 0;
+    for file in files {
+        let Some(path) = file.get("path").and_then(|value| value.as_str()) else {
+            return Err("each file needs a path".to_string());
+        };
+        if !stub_path_ok(path) || !seen.insert(path.to_string()) {
+            return Err("invalid or duplicate path".to_string());
+        }
+        let Some(encoded) = file.get("content_base64").and_then(|value| value.as_str()) else {
+            return Err("content_base64 is required".to_string());
+        };
+        let decoded =
+            base64_decode(encoded).ok_or_else(|| "content_base64 must be base64".to_string())?;
+        if base64_encode(&decoded) != encoded {
+            return Err("content_base64 must be strict base64".to_string());
+        }
+        if decoded.is_empty() || decoded.len() > 256 * 1024 {
+            return Err("file size must be 1-262144 bytes".to_string());
+        }
+        total += decoded.len();
+        if total > 1024 * 1024 {
+            return Err("total commit size must not exceed 1048576 bytes".to_string());
+        }
+    }
+    Ok(())
+}
+
 fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
     haystack
         .windows(needle.len())
@@ -790,6 +952,51 @@ fn blob_read_verifies_digests_and_hydrates_a_disposable_projection() {
     // The projection is disposable; the durable head is still the broker's.
     std::fs::remove_dir_all(&projection).unwrap();
     assert_eq!(client.current_head().unwrap(), broker.head());
+}
+
+#[test]
+fn verify_and_blob_read_support_historical_commits() {
+    let broker = StubBroker::start();
+    broker.seed(vec![("a.json", b"one".to_vec())]);
+    let client = broker.client();
+    let first = broker.head().unwrap();
+
+    let second = client
+        .commit(&CommitRequest::single(
+            "b.json",
+            b"two".to_vec(),
+            Some(first.clone()),
+            "add b",
+            None,
+        ))
+        .expect("second commit")
+        .commit;
+    assert_eq!(broker.head().as_deref(), Some(second.as_str()));
+
+    // Historical verify: b.json did not exist at the first commit.
+    let entries = client
+        .verify(&first, &["a.json".to_string(), "b.json".to_string()])
+        .expect("verify at historical commit")
+        .entries;
+    assert!(entries[0].is_verified());
+    assert!(!entries[1].present);
+
+    // Historical blob read.
+    let blob = client
+        .read_blob("a.json", Some(&first))
+        .expect("blob at historical commit");
+    assert_eq!(blob.bytes().unwrap(), b"one");
+    let at_head = client.read_blob("b.json", None).expect("blob at head");
+    assert_eq!(at_head.bytes().unwrap(), b"two");
+
+    // Unknown commit stays a typed not_found.
+    let missing = client
+        .verify(&"c".repeat(40), &["a.json".to_string()])
+        .unwrap_err();
+    assert_eq!(
+        missing.code(),
+        crosslink::state_broker::BrokerErrorCode::NotFound
+    );
 }
 
 #[test]

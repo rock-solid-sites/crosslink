@@ -285,7 +285,7 @@ landed/not-landed/unknown trichotomy all survive review.
 
 1. C1–C12 were applied to `.design/state-broker-derived-publish.md`
    (documentation only) and committed with this synthesis as the frozen
-   reviewed protocol.
-2. The bounded implementation issue is opened as a subissue of #802 from that
+   reviewed protocol at revision `7e3f71f94`.
+2. The bounded implementation issue was opened as **#804** under #802 from that
    exact revision, carrying the §12 gate list and the T01–T55 test plan.
 3. No implementation starts in this task.

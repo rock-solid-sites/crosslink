@@ -1008,7 +1008,7 @@ fn t43_vanished_ref_never_bootstraps() {
 
 #[test]
 #[allow(clippy::redundant_clone)] // clone from a Drop-containing fixture
-fn t45_concurrent_bootstrap_race_is_handled() {
+fn t46_concurrent_bootstrap_race_is_handled() {
     let transport = seeded_transport();
     let first = MockCheckpointSource::new(1);
     publish_landed(&transport, &first);
@@ -1169,6 +1169,68 @@ fn manifest_context_round_trip_for_mock_state() {
             accounting: AccountingModel::Decoded,
         })
         .unwrap();
+}
+
+#[test]
+fn t41_same_op_id_equal_identity_differing_payload_is_landed() {
+    // A different compressor build produces different payload bytes for the
+    // same semantic identity. The head records our op id; reconcile must
+    // report Landed (provenance differs, identity matches), never Diverged.
+    let transport = seeded_transport();
+    let source = MockCheckpointSource::new(6);
+    let plan =
+        plan_publish_with_op_id(&source, &cfg(), "ckpt-aaaaaaaaaaaa-0000000000000041").unwrap();
+    let request = crate::state_broker::client::CommitRequest {
+        expected_head: None,
+        message: "crosslink checkpoint publish identity".to_string(),
+        op_id: Some(plan.op_id.clone()),
+        files: std::iter::once(crate::state_broker::client::CommitFile {
+            path: MANIFEST_PATH.to_string(),
+            content: plan.manifest_bytes.clone(),
+        })
+        .chain(plan.chunks.iter().enumerate().map(|(slot, chunk)| {
+            crate::state_broker::client::CommitFile {
+                path: super::chunk_path(slot as u32),
+                content: chunk.clone(),
+            }
+        }))
+        .collect(),
+    };
+    transport.commit(&request).unwrap();
+    // Forge the payload digest only: semantic identity is unchanged.
+    let mut manifest = super::manifest::CheckpointManifestV1::from_slice(
+        &transport.file_bytes(MANIFEST_PATH).unwrap(),
+    )
+    .unwrap();
+    manifest.payload_sha256 = "0".repeat(64);
+    transport.corrupt_file(MANIFEST_PATH, serde_json::to_vec(&manifest).unwrap());
+
+    let intent = super::publisher::ReconcileIntent::from_plan(&plan, None);
+    match super::publisher::reconcile(&transport, &cfg(), &intent, None) {
+        super::publisher::ReconcileVerdict::Landed { commit } => {
+            assert_eq!(commit, transport.head().unwrap());
+        }
+        other => panic!("expected Landed, got {other:?}"),
+    }
+}
+
+#[test]
+fn t45_head_manifest_null_watermark_is_refused() {
+    let transport = seeded_transport();
+    let source = MockCheckpointSource::new(1);
+    publish_landed(&transport, &source);
+    let mut value: serde_json::Value =
+        serde_json::from_slice(&transport.file_bytes(MANIFEST_PATH).unwrap()).unwrap();
+    value["source"]["watermark"] = serde_json::Value::Null;
+    transport.corrupt_file(MANIFEST_PATH, serde_json::to_vec(&value).unwrap());
+    let plan = plan_publish(&source, &cfg()).unwrap();
+    match super::publisher::classify_head(&transport, &cfg(), &plan).unwrap() {
+        super::publisher::HeadVerdict::Refuse {
+            reason: RefusalReason::HeadManifestUnreadable,
+            ..
+        } => {}
+        other => panic!("expected HeadManifestUnreadable, got {other:?}"),
+    }
 }
 
 // ── Projection (T24/T26/T37/T44) ─────────────────────────────────────

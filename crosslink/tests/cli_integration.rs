@@ -4161,3 +4161,53 @@ fn test_sentinel_schema_migration() {
         "Schema version should be >= 16 (sentinel migration), got {version}"
     );
 }
+
+// ── state-broker publish-checkpoint (CDP-1) fail-closed paths ────────
+
+#[test]
+fn state_broker_publish_checkpoint_is_local_backend_safe() {
+    let dir = test_dir();
+    std::fs::create_dir_all(dir.path().join(".crosslink")).unwrap();
+    std::fs::write(dir.path().join(".crosslink/hook-config.json"), "{}").unwrap();
+    let (ok, _stdout, stderr) = run_crosslink(
+        dir.path(),
+        &["state-broker", "publish-checkpoint", "--dry-run"],
+    );
+    assert!(!ok, "publishing must fail without a broker backend");
+    assert!(
+        stderr.contains("state backend is local"),
+        "unexpected stderr: {stderr}"
+    );
+}
+
+#[test]
+fn state_broker_publish_checkpoint_requires_repo_binding() {
+    let dir = tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".crosslink")).unwrap();
+    std::fs::write(
+        dir.path().join(".crosslink/hook-config.json"),
+        r#"{"state_backend":"broker"}"#,
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_crosslink"))
+        .current_dir(dir.path())
+        .env("CROSSLINK_STATE_BACKEND", "broker")
+        .env("CROSSLINK_STATE_BROKER_URL", "http://127.0.0.1:9")
+        .env("CROSSLINK_STATE_BROKER_TOKEN", "test-token")
+        .env(
+            "CROSSLINK_STATE_PROJECT_UUID",
+            "7f3c2a1e-9b4d-4c6a-8e2f-1d5b7a9c0e3f",
+        )
+        .args(["state-broker", "publish-checkpoint", "--dry-run"])
+        .output()
+        .expect("run crosslink");
+    assert!(
+        !output.status.success(),
+        "an unbound project must fail closed"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("state_broker_binding"),
+        "unexpected stderr: {stderr}"
+    );
+}

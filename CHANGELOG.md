@@ -37,6 +37,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   validation; and the mock/stub fakes now model commit history and broker
   limits faithfully. No `SyncManager` wiring and no change to the v3 hub model.
 
+- CDP-1 derived-checkpoint publish path (ADR-802 C-now, #804): publishes the
+  exact pushed v3 checkpoint blob into broker v1 as a fixed-slot manifest plus
+  numbered chunks in one whole-tree CAS commit. Deterministic gzip
+  (`mtime=0,xfl=2,os=255`, level 9), semantic identity `(watermark,
+  state_sha256)` for `AlreadyCurrent`/`Diverged`, publisher-specific
+  reconciliation by `Broker-Op` trailer with `Refused` distinct from
+  `ReconcileRequired`, capacity fail-closed under both decoded and wire
+  accounting models, bounded slots `0000..0003`, pinned-commit and
+  inventory↔blob reader checks, `journal_anchored`/`advisory` provenance with an
+  authoritative-hydration gate, a v2 projection marker, a local write-ahead
+  attempt record, a mandatory repository↔project-UUID binding, and the ADR-802
+  §17 item 9 journal high-water-mark check at append. New command:
+  `crosslink state-broker publish-checkpoint [--dry-run] [--verify-full]`. No
+  `SyncManager` wiring, no inbox, no delete, no live write.
+
 - `crosslink migrate hub-v3 --remigrate-from-v2` - regenerates the v3 genesis
   from the current `crosslink/hub` (v2) tip and force-pushes it, superseding a
   stale remote v3 hub. The discoverable recovery path when a v2-only binary

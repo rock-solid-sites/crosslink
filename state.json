@@ -25923,11 +25923,16 @@
       "agent_id": "driver",
       "agent_seq": 73,
       "timestamp": "2026-09-21T03:48:45.582662594Z"
+    },
+    {
+      "agent_id": "driver",
+      "agent_seq": 74,
+      "timestamp": "2026-09-21T03:49:04.411000384Z"
     }
   ],
   "watermark": {
-    "timestamp": "2026-09-21T03:48:45.582662594Z",
+    "timestamp": "2026-09-21T03:49:04.411000384Z",
     "agent_id": "driver",
-    "agent_seq": 73
+    "agent_seq": 74
   }
 }

@@ -126,8 +126,9 @@ The derivation proof is byte-level and reproducible by any third party:
 
 Because the manifest is a deterministic function of `S` plus pinned compressor
 settings, two independent publishers that publish the same `S` produce the same
-semantic identity (`source.commit`, `state_sha256`, `W`) even if their compressed
-bytes differ (§2.4). That semantic identity — not manifest bytes — is what
+semantic identity (`watermark`, `state_sha256`) even if their compressed bytes
+or git commits differ (§2.4). That semantic identity — not manifest bytes — is
+what
 CAS reconciliation compares.
 
 ### 1.4 Forbidden sources
@@ -214,11 +215,18 @@ Reproducibility contract:
 - **Same `S`, same compressor implementation/settings ⇒ byte-identical
   manifest and chunks.** This is what makes a replay a no-op rather than a new
   commit.
+- **Semantic identity of a derived publish is `(watermark, source.state_sha256)`.**
+  `source.commit`, `source.state_blob_sha`, `state_bytes`, and `payload_sha256`
+  are *provenance*: they explain where the bytes came from, but they are not
+  part of the equivalence test. A content-identical re-commit of the same
+  `state.json` bytes at a different git commit sha (for example a
+  `state.json`-only bootstrap checkpoint followed by the first `compact_v3`
+  that adds the browse tree) is equivalent, not divergent.
 - **Same `S`, different compressor implementation ⇒ different bytes, same
-  semantic identity** (`source.commit`, `source.state_sha256`, `W`,
-  `state_bytes`). Reconciliation compares semantic identity; a differing
-  payload with equal `W` and equal `state_sha256` is `AlreadyCurrent`, not
-  divergence.
+  semantic identity.** Reconciliation compares `(watermark, state_sha256)`; a
+  differing payload with equal `W` and equal `state_sha256` is `AlreadyCurrent`,
+  not divergence. Only an equal watermark with a **different** `state_sha256`
+  is divergence.
 - **Different `S` ⇒ different `source.commit` and (normally) different `W`.**
   Watermark monotonicity governs.
 
@@ -394,7 +402,7 @@ struct ChunkEntry {
 | M8 | `source.state_bytes == decompressed length`, `payload_bytes == sum(chunk.size)` | truncation |
 | M9 | `chunk_count == chunks.len()`, `1 <= chunk_count <= MAX_SLOTS`, slots exactly `0..chunk_count` ascending | wrong ordering |
 | M10 | every `chunk.path` equals the derived `checkpoint/chunks/{slot:04}` | wrong ordering/injection |
-| M11 | `1 <= chunk.size <= chunk_slot_bytes`; only the last chunk may be `< chunk_slot_bytes`; `chunk_slot_bytes == 262144` | corruption |
+| M11 | `1 <= chunk.size <= chunk_slot_bytes`; only the last chunk may be `< chunk_slot_bytes`; `chunk_slot_bytes == SLOT_BYTES` for the active `COMMIT_BUDGET_ACCOUNTING` model (§8.5) | corruption |
 | M12 | manifest bytes ≤ `MAX_MANIFEST_BYTES` | oversized |
 | M13 | `source.watermark` parses and, by **value**, equals the decoded state's `watermark` | wrong checkpoint |
 | M14 | `source.state_bytes <= MAX_STATE_BYTES` (reader safety cap) | oversized |
@@ -470,12 +478,17 @@ Given candidate `(W, S, state_sha256)` and the observed head `H`:
 | `H = None` | `Bootstrap` — allowed (`expected_head = null`) |
 | `checkpoint/manifest.json` absent and no `checkpoint/**` path in the inventory | `Supersede(prior = None)` — first CDP-1 publish into a tree with unrelated files |
 | `checkpoint/manifest.json` absent but `checkpoint/**` paths exist | **refuse** (`OverlapUnprovable`) — foreign/legacy chunk namespace |
-| manifest present but unparsable/invalid (§4.3) | **refuse** (`HeadManifestUnreadable`) |
+| manifest present but unparsable/invalid (§4.3), including a missing/null `source.watermark` | **refuse** (`HeadManifestUnreadable`) |
 | manifest `project_uuid`/`state_ref` mismatch | **refuse** (`WrongProject`) |
 | `head.W < W` | `Supersede(prior = manifest)` |
-| `head.W == W` and `source.commit == S` and `source.state_sha256 == state_sha256` | `AlreadyCurrent(H)` — no write |
-| `head.W == W` and semantic identity differs | **diverged** (`EqualWatermarkDifferentContent`) — no write, hard block |
+| `head.W == W` and `head.source.state_sha256 == state_sha256` | `AlreadyCurrent(H)` — no write; provenance (`source.commit`, `payload_sha256`) may differ |
+| `head.W == W` and `head.source.state_sha256 != state_sha256` | **diverged** (`EqualWatermarkDifferentContent`) — no write, hard block |
 | `head.W > W` | **refuse** (`CandidateStale`) — re-plan from a newer checkpoint |
+
+The head manifest must pass §4.3 validation (M1–M16) before any watermark
+comparison; in particular a missing or null `source.watermark` is invalid and
+is refused as `HeadManifestUnreadable`, never ordered as "less than" a real
+watermark.
 
 `OrderingKey` comparison is the derived `Ord` on `(timestamp, agent_id,
 agent_seq)` — the same total order `compaction::reduce` uses. Watermark equality
@@ -489,6 +502,18 @@ chunks), all upserts, in **one** `commit()` call. Never split a publish across
 commits; never write a manifest before its chunks (there is no ordering inside
 one commit, and a manifest referencing not-yet-written chunks would be a
 truncated state if a later commit failed).
+
+The commit message is a single ASCII line of the form
+
+```
+crosslink checkpoint publish <S[0..12]> slots=<n> wm=<agent_id>/<agent_seq>
+```
+
+≤512 characters, no C0/DEL control characters, and not beginning with
+`Project-UUID:`, `Broker:`, or `Broker-Op:` (the broker appends its own trailer
+block, including `Broker-Op: <op_id>`). The watermark timestamp is deliberately
+omitted to keep the line single-line and short; the authoritative watermark is
+the manifest's `source.watermark`.
 
 ### 5.5 Read-back verification (after `verified: true`)
 
@@ -513,10 +538,11 @@ truncated state if a later commit failed).
 |---|---|---|
 | `Landed { commit, op_id }` | verified at the landed commit; head still ours | done |
 | `LandedSuperseded { commit, head }` | our commit landed and verified, but a later publish is head | re-run (idempotent) |
-| `AlreadyCurrent { commit }` | head already carries the same semantic identity | done, no write |
+| `AlreadyCurrent { commit }` | head already carries the same semantic identity `(watermark, state_sha256)` | done, no write |
 | `NotLanded { observed_head }` | provably nothing of ours at head | retry with fresh `expected_head` (bounded) |
+| `Refused { reason, observed_head }` | a definitive, provable refusal (candidate stale, wrong project, unreadable head manifest, overlap unprovable); nothing written | re-plan from a fresh read; not a blocked state |
 | `ReconcileRequired { reason, observed_head }` | unknown or unprovable; writes blocked | resolve by re-read; operator if persistent |
-| `Diverged { reason, observed_head }` | same op id / same watermark with different content | hard stop; manual investigation |
+| `Diverged { reason, observed_head }` | same watermark with a different `state_sha256`, or a reused op id with different semantic content | hard stop; manual investigation |
 | `FailedClosed { reason }` | preflight/limit violation | fix input; no broker call made |
 
 ### 5.7 Lost-response and ambiguity reconciliation
@@ -534,19 +560,20 @@ head == None                              => if expected_head == None: NOT_LANDE
                                              else: UNKNOWN (ref vanished; never bootstrap over it)
 message_records_op(head.message, op_id):
     manifest at head parses &&
-    manifest.source.commit == S &&
-    manifest.source.state_sha256 == state_sha256 &&
-    manifest.payload_sha256 == payload_sha256   => LANDED(head)
-    otherwise                                   => DIVERGED (op id reused / overwritten)
+    manifest.source.watermark == W &&
+    manifest.source.state_sha256 == state_sha256   => LANDED(head)
+        (a differing source.commit or payload_sha256 is provenance, not divergence)
+    manifest parses, semantic identity differs     => DIVERGED (op id reused / overwritten)
+    manifest missing/malformed                     => UNKNOWN
 else (trailer absent):
     if the error carried a commit sha X and X != head:
-        verify(X, owned_paths) all match       => LANDED_SUPERSEDED(X, head)
-        otherwise                               => NOT_LANDED(head)
+        verify(X, request.paths()) all match       => LANDED_SUPERSEDED(X, head)
+        otherwise                                  => NOT_LANDED(head)
     else if X == head:
         # broker named our commit as head but recorded no trailer: contract
         # violation, neither landed nor failed
-                                                => UNKNOWN
-    else                                        => NOT_LANDED(head)
+                                                   => UNKNOWN
+    else                                           => NOT_LANDED(head)
 ```
 
 Why `NOT_LANDED` is safe when the head moved: broker commits are atomic and
@@ -629,6 +656,16 @@ Only the journal-anchored profile may treat a derived read as "derived from
 durable journal state". Broker-only reads are advisory (ADR-802 §3, §8) and
 must never be used for exclusivity, prune, or display-id decisions.
 
+The distinction is **encoded, not conventional**. The reader returns a
+`provenance` value (`JournalAnchored` or `Advisory`), and the projection marker
+records it. A projection whose provenance is `Advisory` may only be
+materialized into a disposable diagnostics database; the authoritative
+hydration seam (`hydrate_from_state`) must refuse anything that is not
+`JournalAnchored`. Manifest authentication is out of scope by design — a
+broker-only reader cannot distinguish a self-consistent forged manifest from a
+genuine one, which is exactly why only journal-anchored reads may be
+decision-bearing.
+
 ### 6.2 Algorithm (pin to one commit)
 
 ```
@@ -671,7 +708,8 @@ read_derived_checkpoint(transport, expect):
       blob = git_cat_file_blob("<m.source.commit>:<m.source.state_path>")
       if blob != state_bytes or sha256(blob) != m.source.state_sha256: Err(ProvenanceMismatch)
 
-  return VerifiedCheckpoint{ commit: C, manifest: m, state, state_bytes }
+  return VerifiedCheckpoint{ commit: C, manifest: m, state, state_bytes,
+                             provenance: if journal_anchored { JournalAnchored } else { Advisory } }
 ```
 
 Key properties:
@@ -738,9 +776,10 @@ misinterpreted:
    prior commit sees the prior manifest and prior chunks.
 6. **A shrunk publish is not a deletion.** `n' < n` is a *supersession of the
    active set*, not a tombstone; nothing reads absence as deletion (ADR-802 §9).
-7. **Bounded namespace.** Slots are fixed at `0000..0031` (practically `0000..
-   0003`); a publish never creates a new slot name it did not previously
-   consider, so garbage cannot grow without bound.
+7. **Bounded namespace.** Slots are fixed at `0000..0003` (`MAX_SLOTS = 4`);
+   the 32-file commit cap is a separate broker limit, not a slot bound. A
+   publish never creates a new slot name it did not previously consider, so
+   garbage cannot grow without bound.
 
 The one behavior that must be explicitly forbidden: a reader (or a "recovery"
 tool) that reconstructs state by globbing `checkpoint/chunks/*` and sorting.
@@ -804,6 +843,9 @@ comments):
 
 These are **measurements, not guarantees**: a less compressible hub hits the
 compressed cap sooner. The fail-closed rule is always on the measured payload.
+The figures above are the **primary (decoded) accounting model**; under the wire
+fallback the current hub still fits (3 slots, ≈611.7 KB wire) once the slot size
+is corrected per §8.5.
 
 ### 8.4 Fail-closed checks before any write
 
@@ -827,13 +869,26 @@ commits, and never writes a partial set.
 ### 8.5 Accounting assumption (must be verified, not assumed forever)
 
 The client mirror (`validate.rs`) checks **decoded** content lengths, derived
-from the broker's `state.ts`. If the deployed broker actually counts the
-base64-encoded wire body, the commit budget becomes 786,432 decoded bytes and
-the payload capacity 782,336 bytes (3 slots). The protocol therefore carries a
-single constant `COMMIT_BUDGET_ACCOUNTING ∈ {Decoded, Wire}`; the primary value
-is `Decoded`, and the loopback boundary test (§10 H6) plus the eventual live
-boundary probe are the evidence that resolves it. A hub near the boundary must
-not be published until that evidence exists.
+from the broker's `state.ts`. The primary model is therefore `Decoded`:
+
+| Model | slot payload (decoded) | payload capacity | slots | files | current hub |
+|---|---|---|---|---|---|
+| Decoded (primary) | 262,144 | 1,044,480 | 4 | 5 | 2 slots, 43.8 % |
+| Wire (fallback) | 196,608 | 782,336 | 4 | 5 | 3 slots, ≈611.7 KB wire |
+
+Under the Wire fallback the per-file cap applies to the base64 body, so the
+decoded slot cap is `floor(262,144 × 3/4) = 196,608` and the decoded commit cap
+is `floor(1,048,576 × 3/4) − 4,096 = 782,336` (slots:
+`ceil(782,336 / 196,608) = 4`). Both models are fail-closed and both fit the
+measured hub; the constants (`SLOT_BYTES`, `MAX_PAYLOAD_BYTES`) are selected by
+a single `COMMIT_BUDGET_ACCOUNTING ∈ {Decoded, Wire}` value, and §4.3 M11 and
+Appendix D are parameterized by it.
+
+Resolution evidence: the deployed broker's source (`state.ts` `LIMITS`
+semantics) if obtainable, **or** a reviewed live boundary probe on a synthetic
+project (L2, operator-approved). The loopback stub cannot resolve it: the stub
+mirrors the client's decoded assumption and can only confirm it, never falsify
+it. A hub near the boundary must not be published until this is resolved.
 
 ---
 
@@ -868,6 +923,7 @@ struct DerivedProjectionMarker {
     state_ref: String,
     head_commit: String,            // broker commit C the projection was pinned to
     complete: bool,                 // false until every file is written
+    provenance: String,             // "journal_anchored" | "advisory"
     // ---- derived from the manifest ----
     manifest_path: String,          // "checkpoint/manifest.json"
     manifest_sha256: String,        // sha256 of the manifest bytes at C
@@ -905,19 +961,26 @@ verify_derived_projection(transport, dir, expect):
   5. re-read+verify checkpoint/state.json in dir:
      size == marker.bytes, sha256 == marker.state_sha256
   6. if expect.min_watermark: marker.watermark >= expect.min_watermark
-  7. (journal-anchored) git cross-check of source_checkpoint_commit/state_sha256
+  7. provenance gate: if the consumer is the authoritative hydration seam, the
+     marker must be provenance == "journal_anchored" and the git cross-check of
+     source_checkpoint_commit/state_sha256 must pass; an "advisory" projection is
+     refused. Advisory projections are diagnostics-only (disposable database),
+     never the authoritative SQLite.
 ```
 
 A projection is fresh for a consumer iff its pinned commit equals the head read
 at consumption (step 3) and the manifest identity still matches (step 4). A
 consumer that explicitly accepts a recorded older watermark may use it for
 advisory reads only — never for exclusivity, prune, or display-id decisions
-(ADR-802 §8).
+(ADR-802 §8). Only a `journal_anchored` projection may be fed to the
+authoritative hydration path.
 
-`checkpoint/state.json` in the projection is fed to the existing
+`checkpoint/state.json` in a `journal_anchored` projection is fed to the existing
 `crate::checkpoint::read_checkpoint`/`hydrate_from_state` path (the same entry
 point the v3 write path uses); the projection never touches SQLite directly and
-never writes a `record_hydrated_ref` git marker (namespaces stay distinct).
+never writes a `record_hydrated_ref` git marker (namespaces stay distinct). An
+`advisory` projection may only be read into a disposable database and must be
+labelled as such in any report derived from it.
 
 ---
 
@@ -943,11 +1006,11 @@ Levels: **U** = pure unit (no transport), **M** = mock-broker contract
 | T11 | newer watermark already present | M | `CandidateStale` refusal, no write |
 | T12 | same watermark + identical semantic identity replay | M | `AlreadyCurrent`, commit count unchanged |
 | T13 | same watermark + different `state_sha256` | M | `Diverged`, no write |
-| T14 | same op-id + different content at head | M, H | `Diverged` (never `Ok`/`verified:false`) |
+| T14 | same op-id + different `state_sha256` at head | M, H | `Diverged` (never `Ok`/`verified:false`) |
 | T15 | lost response after successful commit (commit lands, client sees transport error) | M, H | reconcile by op id → `Landed`, exactly one commit |
 | T16 | lost response where commit did not land | M, H | reconcile → `NotLanded` → one bounded retry → `Landed` |
 | T17 | 502 read-back ambiguity with commit sha in details, head has our content | H | `Landed` |
-| T18 | 502 where head moved past our commit and carries no op id | H | `NotLanded`, no divergence |
+| T18 | 502 ambiguity, two variants: (a) the error carries commit sha X ≠ head and our active paths verify at X → `LandedSuperseded`; (b) no commit sha and head carries no op id → `NotLanded` | H | outcome depends on whether the error carries a commit sha |
 | T19 | reconcile read failure (state read fails) | M | `ReconcileRequired`; subsequent publish blocked until resolved |
 | T20 | oversized checkpoint (payload > capacity) | U, M | `FailedClosed`, zero commit calls |
 | T21 | exact size boundary (payload == 1,044,480 OK; +1 fail; manifest 4096 OK/4097 fail; 4 slots OK/5 fail) | U | boundary exactness |
@@ -969,6 +1032,22 @@ Levels: **U** = pure unit (no transport), **M** = mock-broker contract
 | T37 | projection hydration from manifest+chunks → `checkpoint/state.json` → existing `read_checkpoint` | M, H | byte-identical to source; marker v2 fields exact |
 | T38 | `--dry-run` (plan + capacity + no commit) | M | zero broker write calls; full plan reported |
 | T39 | blob answered at another commit / inventory↔blob mismatch | U, M, H | `ProtocolMismatch` / `InventoryMismatch` rejection |
+| T40 | content-identical checkpoint re-commit: `head.W == W`, same `state_sha256`, different `source.commit` | U, M | `AlreadyCurrent`, not `Diverged` |
+| T41 | same op id at head, equal `(W, state_sha256)`, differing `payload_sha256` | M | `Landed`/no-op (provenance differs, identity matches) |
+| T42 | `LandedSuperseded` with `n < 4` chunks: reconcile verifies the active paths only | M, H | `LandedSuperseded`, never a spurious `NotLanded` |
+| T43 | vanished ref with `expected_head != null` during reconcile | M | `ReconcileRequired`/unknown; never bootstrap |
+| T44 | `Advisory` (broker-only) projection fed to the hydration seam | U, M | refused; only `journal_anchored` may hydrate |
+| T45 | head manifest with missing/null `source.watermark` | U, M | refused as `HeadManifestUnreadable` |
+| T46 | concurrent bootstrap / equal-watermark race with different `publisher_id` | M | one lands; the loser classifies to `AlreadyCurrent`/`Diverged`, never clobbers |
+| T47 | wire-accounting parameterization: boundaries recomputed under `COMMIT_BUDGET_ACCOUNTING = Wire` | U | 196,608 / 782,336 / 4-slot boundaries exact |
+| T48 | decompression bomb: payload expanding beyond `source.state_bytes`/`MAX_STATE_BYTES` | U | bounded decompression refuses |
+| T49 | projection path offered as a publish source | U, M | publisher refuses (never re-publish a projection) |
+| T50 | forged self-consistent manifest against a broker-only reader | U | admitted as `Advisory` only; cannot hydrate or decide |
+| T51 | watermark ordering across agents (derived `Ord`, lagging clock) | U | older/incomparable candidate refused, never superseded into |
+| T52 | manifest size 4,096 / 4,097 at loopback level | H | boundary accepted / rejected |
+| T53 | op-id grammar boundary (`[A-Za-z0-9._:-]{1,128}`) | U | exact boundary |
+| T54 | commit-message boundaries (single line, ≤512, no C0/DEL, no leading trailer key) | U | exact boundary |
+| T55 | refusals are `Refused`, not `ReconcileRequired`: candidate stale / wrong project / unreadable head manifest | U, M | outcome class and no blocked state |
 
 **L1 (the one reviewed live write).** After all gates in §12 are closed and with
 explicit operator approval: publish the current pushed checkpoint of this
@@ -1003,53 +1082,62 @@ of L1.
 
 ## 11. Unresolved questions
 
-1. **Limit accounting (decoded vs wire bytes).** §8.5. Must be resolved by the
-   loopback boundary test plus a live probe before any near-boundary publish.
-2. **Compression determinism.** Is a pinned `flate2`/`miniz_oxide` version
-   guaranteed byte-stable across platforms? If not, the protocol still works
-   (semantic-identity comparison), but replay is a new commit rather than a
-   no-op. Confirm the chosen dependency and record `compression_impl`; consider
-   a determinism test across the CI matrix.
-3. **Project UUID ↔ repository binding.** ADR-802 §16/§17 item 8 residual: the
-   manifest records the broker project UUID, but nothing yet binds it to this
-   git repository/remote. Publishing into the wrong project remains possible
-   until that binding exists. Is `state_ref` + configured UUID + operator
-   invocation sufficient for the first write, or must repo↔UUID binding land
-   first?
-4. **Manifest provenance scope.** Agent-ref tip snapshots were deliberately
-   excluded (§4.4) to keep the manifest a pure function of `S`. Confirm that
-   ADR-802 does not require them; if a coverage audit does, add them as a
-   *separate* provenance object excluded from semantic identity.
-5. **Superseding a different `publisher_id`.** Is automatic takeover (strictly
-   lower watermark, valid manifest) acceptable, or should a different publisher
-   always require an explicit operator flag? (Recommended: allow with a logged
-   takeover; require the flag only if the head publisher differs *and* the head
-   watermark is equal-but-different, which is already `Diverged`.)
-6. **`AlreadyCurrent` when the manifest bytes differ but the semantic identity
-   matches** (different compressor): treat as no-op (recommended) or as a new
-   publish to normalize the manifest? (Recommended: no-op.)
-7. **Slot count ceiling.** `MAX_SLOTS = 4` is forced by the 1 MiB commit cap.
-   A hub whose gzip exceeds 1,044,480 B simply cannot be published under C-now.
-   Is fail-closed acceptable as the terminal state for such hubs (with broker
-   v2 / per-head layout as the escape hatch), or is a multi-commit
-   continuation rule needed? (Recommended: fail closed; multi-commit violates
-   ADR-802 §10.)
-8. **Reader trust for broker-only consumers.** A broker-only reader cannot
-   distinguish a self-consistent forged manifest from a genuine one. ADR-802
-   already limits derived reads to advisory use; confirm that no consumer with
-   hydration privileges will run broker-only without the journal-anchored check
-   available.
-9. **Projection directory disjointness.** ADR-802 §17 item 4 residual: the
-   projection root must be provably disjoint from `.crosslink/.hub-cache` and
-   authoritative dirs. Is a path check plus the v2 marker sufficient, or does
-   this need a configured allow-list?
-10. **Attempt-record location and retention.** Proposed
+Status markers: **(resolved in the reviewed revision)** = the clean-room review
+adjudicated it and the decision is now part of the protocol; **(open)** = must
+still be closed before or during implementation.
+
+1. **(open) Limit accounting (decoded vs wire bytes).** §8.5 now carries a
+   corrected Wire fallback (slot 196,608 / payload 782,336 / 4 slots) and the
+   correct resolution path: the deployed broker source or a reviewed live
+   boundary probe (L2), not the loopback stub. Must be resolved before any
+   near-boundary publish.
+2. **(resolved) Compression determinism.** A pinned `flate2`/`miniz_oxide`
+   build is *expected* to be byte-stable, but the protocol no longer depends on
+   it: semantic identity `(watermark, state_sha256)` governs
+   `AlreadyCurrent`/`Diverged`, so a different compressor output is a valid
+   equivalent publish, not a divergence. `compression_impl` is recorded as
+   provenance; a cross-platform determinism test (T28) remains desirable for
+   replay-no-op efficiency, not for correctness.
+3. **(resolved) Project UUID ↔ repository binding.** Now a hard pre-L1 gate
+   (§12 item 9): ADR-802 §16 requires it implemented and enforced in code; a
+   waiver is not sufficient without a formal ADR amendment.
+4. **(resolved) Manifest provenance scope.** Agent-ref tip snapshots remain
+   deliberately excluded; the manifest is a pure function of `S`, and
+   `source.commit`/`state_blob_sha`/`state_sha256`/`watermark` are the
+   ADR-802-required provenance. Any future coverage-audit need adds a separate
+   object excluded from semantic identity.
+5. **(resolved) Superseding a different `publisher_id`.** Automatic takeover is
+   allowed only for a valid manifest with a strictly lower watermark (logged as
+   a takeover); equal-watermark content differences are `Diverged`, never a
+   takeover.
+6. **(resolved) `AlreadyCurrent` when manifest bytes differ but semantic
+   identity matches.** No-op; no normalizing re-publish. `source.commit` and
+   `payload_sha256` are provenance.
+7. **(resolved) Slot count ceiling.** Fail closed once the compressed payload
+   exceeds the accounting model's capacity; multi-commit continuation is
+   rejected (ADR-802 §10); broker v2 / per-head layout is the escape hatch.
+8. **(resolved) Reader trust for broker-only consumers.** Provenance is
+   encoded (`JournalAnchored`/`Advisory`); only journal-anchored projections may
+   hydrate the authoritative database or inform decisions; advisory projections
+   are diagnostics-only. Manifest authentication remains out of scope by
+   design.
+9. **(open) Projection directory disjointness.** ADR-802 §17 item 4 residual:
+   the projection root must be provably disjoint from `.crosslink/.hub-cache`
+   and authoritative dirs. Is a path check plus the v2 marker sufficient, or
+   does this need a configured allow-list?
+10. **(open) Attempt-record location and retention.** Proposed
     `.crosslink/state-broker/publish-attempt.json`; confirm it is acceptable for
     the record to persist (including `Diverged`/`blocked` states) and whether it
     should be gitignored.
-11. **Whether to publish at all while a prune has occurred.** The blob is
+11. **(open) Whether to publish at all while a prune has occurred.** The blob is
     self-contained, so prune is irrelevant; confirm no operator expectation
     that a broker publish implies "recently pruned".
+12. **(resolved, operational) Version skew.** Two publishers on different
+    Crosslink versions that serialize different `state.json` bytes at the same
+    watermark will hard-block as `Diverged` until an operator reconciles. The
+    content genuinely differs, so the block is correct; operators should
+    upgrade publishers together, and the condition is documented rather than
+    softened.
 
 ---
 
@@ -1080,9 +1168,11 @@ of L1.
    CDP-1 must **not** call generic `commit_cas`; it needs a publisher-specific
    reconcile implementing §5.3 + §5.7. This is a design requirement on the
    implementation, not an optional refinement.
-9. Backend identity binding per-read at minimum (item 8 partial); repo↔UUID
-   binding is question 3 and must be resolved or explicitly waived for the
-   first write.
+9. Backend identity binding per-read at minimum (item 8 partial). **Repo↔UUID
+   binding is a hard pre-L1 gate:** ADR-802 §16 requires "backend identity
+   binding (project UUID ↔ repository identity)" to be implemented and enforced
+   in code, so it may not be waived without a formal ADR amendment. Until the
+   binding exists, a wrong-project publish passes every manifest/config check.
 10. Journal high-water-mark check at append (item 9) — required before any
     broker write is enabled per ADR-802 §17, independent of CDP-1's correctness.
 
@@ -1091,8 +1181,11 @@ of L1.
 11. Compression dependency selected and pinned (`flate2` + `miniz_oxide` or
     equivalent), with a determinism test (T28) and the header requirements of
     §2.3.
-12. `COMMIT_BUDGET_ACCOUNTING` resolved by the loopback boundary test (T21,
-    T35, H6); no near-boundary publish before it is resolved.
+12. `COMMIT_BUDGET_ACCOUNTING` resolved by the deployed broker source or a
+    reviewed live boundary probe on a synthetic project (L2, operator-approved).
+    The decoded-basis unit and loopback tests (T21, T35) are necessary but
+    cannot resolve it — the stub mirrors the client's assumption. No
+    near-boundary publish before it is resolved.
 13. A `--dry-run`/plan mode exists that performs zero broker writes (T38) so
     the protocol can be exercised in CI and in review.
 14. The local attempt record (Appendix C) is implemented with atomic writes and
@@ -1110,6 +1203,11 @@ of L1.
     prune is triggered by the publish.
 19. A read-back comparison against `git cat-file blob S:state.json` is performed
     as part of L1, and the result is recorded in the issue/handoff.
+20. Historical-commit reads (`read_blob`/`verify` at a non-head commit) are
+    proven only against the mock/stub. Before L1, confirm the deployed broker
+    serves them with a read-only probe; if it does not, `LandedSuperseded`
+    degrades to `NotLanded` and that degradation must be accepted explicitly in
+    the implementation issue.
 
 ---
 
@@ -1145,7 +1243,7 @@ fn publish_checkpoint(cfg, git, transport, opts) -> PublishOutcome:
   decision = classify_head(transport, st0, cfg, W, S, state_sha256(state_bytes))  # §5.3
   match decision:
     AlreadyCurrent(c) -> resolve(record, already_current, c); return AlreadyCurrent(c)
-    Refuse(reason)    -> resolve(record, refused, reason);    return ReconcileRequired(reason)
+    Refuse(reason)    -> resolve(record, refused, reason);    return Refused(reason)
     Bootstrap | Supersede -> proceed
 
   # ---------- one CAS commit ----------
@@ -1180,13 +1278,14 @@ fn reconcile(record, req, carried_commit) -> PublishOutcome:
       else: return block(record, unknown)               # never bootstrap over a vanished ref
   if message_records_op(head.message, req.op_id):
       m = read_manifest_at(head.commit)
-      if m valid and m.source.commit == S and m.source.state_sha256 == state_sha256
-         and m.payload_sha256 == payload_sha256:
-            resolve(record, landed, head.commit); return Landed(head.commit)
-      else:
-            resolve(record, diverged, head.commit); return Diverged(head.commit)
+      if m valid and m.source.watermark == W and m.source.state_sha256 == state_sha256:
+          resolve(record, landed, head.commit); return Landed(head.commit)
+          # a differing source.commit or payload_sha256 is provenance, not divergence
+      if m valid:
+          resolve(record, diverged, head.commit); return Diverged(head.commit)
+      return block(record, unknown)      # our trailer without a readable manifest
   if carried_commit != null and carried_commit != head.commit:
-      if verify(carried_commit, owned_paths) all match:
+      if verify(carried_commit, req.paths()) all match:
           resolve(record, landed_superseded, carried_commit); return LandedSuperseded(carried_commit, head.commit)
   if carried_commit != null and carried_commit == head.commit:
       # The broker named our commit as the head but the trailer is absent:
@@ -1207,14 +1306,22 @@ may re-run to reach the newer watermark.
 fn read_derived_checkpoint(transport, cfg, expect) -> VerifiedCheckpoint:
   st = transport.read_state()
   C  = st.state.head?.commit or Err(NoDurableState)
-  m_raw = transport.read_blob(MANIFEST_PATH, Some(C)).bytes()      # pinned
+  inv = index(st.state.entries by path)
+  m_raw = transport.read_blob(MANIFEST_PATH, Some(C))            # pinned
+  if m_raw.commit != C: Err(ProtocolMismatch)
+  if inv has MANIFEST_PATH and (inv.blob_sha != m_raw.blob_sha or inv.size != m_raw.size):
+      Err(InventoryMismatch)
   if m_raw.len() > MAX_MANIFEST_BYTES: Err(OversizedManifest)
   m = CheckpointManifestV1::from_slice(m_raw) or Err(MalformedManifest)
   validate_manifest(m, st, cfg, expect) or Err(<class from §4.3>)
 
   payload = Vec::with_capacity(m.payload_bytes)
   for c in m.chunks:
-      raw = transport.read_blob(c.path, Some(C)).bytes()
+      b = transport.read_blob(c.path, Some(C))                   # same pinned commit
+      if b.commit != C: Err(ProtocolMismatch)
+      if inv has c.path and (inv.blob_sha != b.blob_sha or inv.size != b.size):
+          Err(InventoryMismatch)
+      raw = b.bytes()
       if raw.len() != c.size or sha256(raw) != c.sha256: Err(CorruptChunk(c.slot))
       payload.extend(raw)
   if payload.len() != m.payload_bytes or sha256(payload) != m.payload_sha256: Err(Truncated)
@@ -1231,11 +1338,14 @@ fn read_derived_checkpoint(transport, cfg, expect) -> VerifiedCheckpoint:
       if git.cat_file_blob(m.source.commit + ":" + m.source.state_path) != state_bytes:
           Err(ProvenanceMismatch)
 
-  return VerifiedCheckpoint{ commit: C, manifest: m, state, state_bytes }
+  return VerifiedCheckpoint{ commit: C, manifest: m, state, state_bytes,
+                             provenance: if expect.journal_anchored { JournalAnchored } else { Advisory } }
 
 fn hydrate_derived_projection(transport, dir, expect) -> ProjectionMarker:
   vc = read_derived_checkpoint(transport, cfg, expect)
-  marker = DerivedProjectionMarker{ ..., complete: false, manifest_sha256: sha256(vc.manifest_bytes),
+  require vc.provenance == JournalAnchored            # authoritative hydration only
+  marker = DerivedProjectionMarker{ ..., complete: false, provenance: "journal_anchored",
+                                    manifest_sha256: sha256(vc.manifest_bytes),
                                     op_id, source_checkpoint_commit, state_sha256, watermark, ... }
   atomic_write_marker(dir, marker)                       # incomplete first
   atomic_write(dir/"checkpoint/state.json", vc.state_bytes)
@@ -1285,11 +1395,11 @@ ambiguous publish can be reconciled by `op_id` before any new write, and so a
 |---|---|
 | `MANIFEST_PATH` | `checkpoint/manifest.json` |
 | `SLOT_PATH_FMT` | `checkpoint/chunks/{slot:04}` |
-| `SLOT_BYTES` | `262_144` |
+| `SLOT_BYTES` | `262_144` (Decoded) / `196_608` (Wire, §8.5) |
 | `MAX_SLOTS` | `4` |
 | `MAX_MANIFEST_BYTES` | `4_096` |
 | `COMMIT_BUDGET_BYTES` | `1_048_576` |
-| `MAX_PAYLOAD_BYTES` | `1_044_480` |
+| `MAX_PAYLOAD_BYTES` | `1_044_480` (Decoded) / `782_336` (Wire, §8.5) |
 | `MAX_STATE_BYTES` | `16_777_216` |
 | `MANIFEST_SCHEMA` | `crosslink-checkpoint-manifest/v1` |
 | `PROJECTION_SCHEMA` | `crosslink-state-projection/v2` |

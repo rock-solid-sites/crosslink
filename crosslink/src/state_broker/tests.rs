@@ -215,49 +215,67 @@ fn readback_mismatch_is_typed_for_reconciliation() {
 }
 
 /// The projection a broker transport writes must be consumable by the existing
-/// v2 hydration path unchanged: this is the "local files are a disposable
-/// projection" contract in executable form.
+/// state-hydration path unchanged: this is the "local SQLite/files are a
+/// disposable projection" contract in executable form.
+///
+/// The v3 checkpoint path is used deliberately: `hydrate_from_state` is what
+/// Crosslink's write path hydrates through, and it is not an audit-guarded
+/// destructive v2 entry point.
 #[test]
-fn broker_projection_feeds_existing_sqlite_hydration() {
-    let issue = crate::issue_file::IssueFile {
-        uuid: Uuid::new_v4(),
-        display_id: Some(1),
-        title: "hydrated from broker state".to_string(),
-        description: None,
-        status: crate::models::IssueStatus::Open,
-        priority: crate::models::Priority::Medium,
-        parent_uuid: None,
-        created_by: "agent-broker".to_string(),
-        created_at: Utc::now(),
-        updated_at: Utc::now(),
-        closed_at: None,
-        scheduled_at: None,
-        due_at: None,
-        labels: Vec::new(),
-        comments: Vec::new(),
-        blockers: Vec::new(),
-        related: Vec::new(),
-        milestone_uuid: None,
-        time_entries: Vec::new(),
+fn broker_projection_feeds_existing_state_hydration() {
+    let uuid = Uuid::new_v4();
+    let mut state = crate::checkpoint::CheckpointState {
+        next_display_id: 2,
+        next_comment_id: 1,
+        ..crate::checkpoint::CheckpointState::default()
     };
-    let issue_json = serde_json::to_vec(&issue).unwrap();
+    state.display_id_map.insert(uuid, 1);
+    state.issues.insert(
+        uuid,
+        crate::checkpoint::CompactIssue {
+            uuid,
+            display_id: Some(1),
+            title: "hydrated from broker state".to_string(),
+            description: None,
+            status: crate::models::IssueStatus::Open,
+            priority: crate::models::Priority::Medium,
+            parent_uuid: None,
+            created_by: "agent-broker".to_string(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            closed_at: None,
+            scheduled_at: None,
+            due_at: None,
+            labels: std::collections::BTreeSet::new(),
+            blockers: std::collections::BTreeSet::new(),
+            related: std::collections::BTreeSet::new(),
+            milestone_uuid: None,
+            comments: std::collections::BTreeMap::new(),
+            time_entries: std::collections::BTreeMap::new(),
+        },
+    );
+
+    // Serialize the state with the existing writer, then serve those exact bytes
+    // as a broker blob (v3 layout).
+    let scratch = tempfile::tempdir().unwrap();
+    crate::checkpoint::write_checkpoint(scratch.path(), &state).unwrap();
+    let checkpoint_bytes = std::fs::read(scratch.path().join("checkpoint/state.json")).unwrap();
     let mock = MockStateTransport::with_files(
         UUID,
-        [
-            (format!("issues/{}.json", issue.uuid), issue_json),
-            (
-                "meta/counters.json".to_string(),
-                br#"{"next_display_id":2,"next_comment_id":1}"#.to_vec(),
-            ),
+        vec![
+            ("checkpoint/state.json", checkpoint_bytes),
+            ("meta/hub.json", br#"{"hub_version":3}"#.to_vec()),
         ],
     );
 
+    // Durable state -> disposable projection -> existing reader -> SQLite.
     let dir = tempfile::tempdir().unwrap();
     let projection = dir.path().join("state-projection");
     mock.hydrate_into(&projection, None).expect("hydrate");
 
+    let read_back = crate::checkpoint::read_checkpoint(&projection).expect("read checkpoint");
     let db = crate::db::Database::open(Path::new(":memory:")).unwrap();
-    let stats = crate::hydration::hydrate_to_sqlite_exempt(&projection, &db).unwrap();
+    let stats = crate::hydration::hydrate_from_state(&read_back, &db).unwrap();
     assert_eq!(stats.issues, 1);
     let hydrated = db.get_issue(1).unwrap().expect("issue hydrated");
     assert_eq!(hydrated.title, "hydrated from broker state");

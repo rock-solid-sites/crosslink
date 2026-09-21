@@ -93,10 +93,14 @@ use `commit()` and reconcile explicitly. This mirrors the broker README's
 `SQLite`, never commits to git, and the projection may be deleted at any time:
 the durable head is always re-read from the transport.
 
-The unit test `broker_projection_feeds_existing_sqlite_hydration` executes the
-claim: a broker projection containing v2-layout `issues/<uuid>.json` +
-`meta/counters.json` is fed **unchanged** to
-`crate::hydration::hydrate_to_sqlite_exempt`, which populates SQLite as today.
+The unit test `broker_projection_feeds_existing_state_hydration` executes the
+claim: a broker projection containing the v3 checkpoint
+(`checkpoint/state.json`, produced by the existing `write_checkpoint`) is read
+back with `crate::checkpoint::read_checkpoint` and hydrated into SQLite by
+`crate::hydration::hydrate_from_state` — the same entry point the v3 write path
+uses. The destructive v2 `hydrate_to_sqlite` path is intentionally not used
+from the adapter or its tests: it is audit-guarded to exactly two documented
+exemptions (`integrity_drift` temp-DB and `migrate` v2-only import).
 
 ### 3.3 Backend selection (preserves existing behavior)
 
@@ -185,7 +189,7 @@ later is an adapter implementation plus call-site routing — no redesign of
   `commit_cas` (the op-id trailer check is the reconciliation authority).
 - The full Crosslink hub tree (event logs, checkpoints, meta, locks) has not
   been round-tripped through the broker; only the transport semantics and the
-  v2-file projection path are proven.
+  v3-checkpoint projection path are proven.
 - `hook-config.json`'s `state_backend` key is read but deliberately not
   registered in the config registry/TUI in this change (env is the primary
   selector). `crosslink config get state_backend` will not know it yet.
@@ -228,6 +232,8 @@ cache; no source changes to the preserved branch):
 |---|---|
 | `cargo test --lib state_broker` | 40 passed, 0 failed |
 | `cargo test --bin crosslink state_broker` | 41 passed, 0 failed |
+| `cargo test --bin crosslink -- --skip proptest` (full bin suite, pre-fix run) | 2928 passed, 1 failed — the failure was the `hydrate_to_sqlite_exempt` call-site inventory guard, tripped by the adapter test calling that audit-guarded destructive path; the test was rewritten to use the v3 checkpoint path (`hydrate_from_state`), the guard test re-verified individually (1 passed), and the full suite re-run (see handoff for the final numbers) |
+| `cargo test --test cli_integration` (full CLI suite) | 199 passed, 0 failed |
 | `cargo test --test state_broker_contract` | 7 passed, 0 failed (real HTTP over 127.0.0.1) |
 | `cargo test --test state_broker_live` | 0 run, 1 ignored (live probe; requires operator env) |
 | `cargo clippy --lib` | 0 warnings from `state_broker` (pre-existing lib warnings remain) |

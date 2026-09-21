@@ -67,9 +67,22 @@ Runtime: `opencode run --model <id> [--variant <v>] --dir <packet> --format json
 
 # Status
 
-- [ ] reviewer-1 GLM-5.3-Flash
-- [ ] reviewer-2 Qwen 3.8 Flash
-- [ ] reviewer-3 Big Pickle
-- [ ] reviewer-4 Nemotron Ultra
-- [ ] reviewer-5 Muse Spark 1.3
-- [ ] synthesis
+- [x] reviewer-1 GLM-5.3-Flash — complete, exit 0 (2,716,387 tokens, $0.1204)
+- [x] reviewer-2 Qwen 3.8 Flash — complete, exit 0 (4,108,148 tokens, $0.1227)
+- [x] reviewer-3 Big Pickle — **failed twice** (`403` free-tier provider
+      restriction), retried once as required; **substituted** with
+      `opencode/mimo-v2.5-free`; substitute emitted the full report then hit the
+      same 403 (exit 1), report recovered from the event stream
+      (912,417 tokens, $0)
+- [x] reviewer-4 Nemotron Ultra — complete, exit 0 (1,205,010 tokens, $0);
+      **read-only rule violation**: wrote `REVIEW.md` into its own packet copy;
+      contained, report recovered from that file
+- [x] reviewer-5 Muse Spark 1.3 — complete, exit 0 (731,590 tokens, $0.0180)
+- [x] synthesis — `99-synthesis.md`
+
+Raw reviewer outputs: `01-…`–`05-…` in this directory; usage JSON under
+`usage/`. Unmodified raw event streams and packet copies remain under
+`/tmp/opencode/review-802/reviewer-N/` on the machine that ran the panel.
+
+No reviewer saw another review before submitting. No live broker operation was
+performed. No repository file was modified by any reviewer.

@@ -148,7 +148,7 @@ Relative to the base branch tip (`feature/pp3g-state-broker-adapter` @
 `48b503ec6`):
 
 ```
-13 files changed, 3169 insertions(+), 436 deletions(-)   (net +2733)
+13 files changed, 3199 insertions(+), 436 deletions(-)   (net +2763)
 ```
 
 Breakdown by area: production logic/API ≈ +1,000; new `projection.rs` ≈ +545

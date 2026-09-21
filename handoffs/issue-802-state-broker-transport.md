@@ -33,11 +33,15 @@ preserved.
 
 # Verification evidence
 
-- `cargo test --lib state_broker`: 40 passed.
-- `cargo test --bin crosslink state_broker`: 41 passed.
-- `cargo test --test state_broker_contract`: 7 passed (real HTTP over
+- `cargo test --lib state_broker`: 41 passed.
+- `cargo test --bin crosslink state_broker`: 42 passed.
+- `cargo test --test state_broker_contract`: 8 passed (real HTTP over
   loopback; no live broker dependency).
 - `cargo test --test state_broker_live`: ignored by default.
+- `cargo test --test cli_integration`: 199 passed.
+- Full bin suite: see `handoffs/802-review-hy3.md` for the final run result
+  (one discovered test was the audit-guarded v2 hydration inventory guard,
+  resolved by moving the adapter test to the v3 checkpoint path).
 - `cargo clippy --lib`: 0 warnings from `state_broker`.
 - CLI smoke: local status; broker-selected-without-env hard error;
   unreachable-loopback typed transport error with no token exposure.
@@ -54,9 +58,11 @@ preserved.
   $60 monthly; `nemotron-verifier` free ($0).
 - Operator approval: verbal selection "Hy3" via the question tool.
 - Deliverable: bounded read-only adversarial review of the module, tests, and
-  design doc (contract conformance, CAS/stale_state, token leaks, projection
-  safety, test integrity, doc truthfulness).
-- Review output: `handoffs/802-review-hy3.md` (added when complete).
+  design doc.
+- Result: 1 major + 2 minor + 2 nit findings, all triaged and fixed; full
+  report and dispositions in `handoffs/802-review-hy3.md`.
+- Discovered separately: pre-existing `agents-hygiene` test flake (shared
+  `/tmp/AGENTS.md`), filed as issue #803 (not fixed here).
 
 # Known findings (own review, fixed)
 

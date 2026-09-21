@@ -230,11 +230,11 @@ cache; no source changes to the preserved branch):
 
 | Command | Result |
 |---|---|
-| `cargo test --lib state_broker` | 40 passed, 0 failed |
-| `cargo test --bin crosslink state_broker` | 41 passed, 0 failed |
-| `cargo test --bin crosslink -- --skip proptest` (full bin suite, pre-fix run) | 2928 passed, 1 failed — the failure was the `hydrate_to_sqlite_exempt` call-site inventory guard, tripped by the adapter test calling that audit-guarded destructive path; the test was rewritten to use the v3 checkpoint path (`hydrate_from_state`), the guard test re-verified individually (1 passed), and the full suite re-run (see handoff for the final numbers) |
+| `cargo test --lib state_broker` | 41 passed, 0 failed |
+| `cargo test --bin crosslink state_broker` | 42 passed, 0 failed |
+| `cargo test --bin crosslink -- --skip proptest --skip agents_hygiene` (full bin suite) | pending final run (see handoff); the previous complete run was 2928 passed / 1 failed — the failure was the `hydrate_to_sqlite_exempt` call-site inventory guard, tripped by the adapter test calling that audit-guarded destructive path. The test was rewritten to use the v3 checkpoint path (`hydrate_from_state`), the guard test re-verified individually (1 passed) |
 | `cargo test --test cli_integration` (full CLI suite) | 199 passed, 0 failed |
-| `cargo test --test state_broker_contract` | 7 passed, 0 failed (real HTTP over 127.0.0.1) |
+| `cargo test --test state_broker_contract` | 8 passed, 0 failed (real HTTP over 127.0.0.1) |
 | `cargo test --test state_broker_live` | 0 run, 1 ignored (live probe; requires operator env) |
 | `cargo clippy --lib` | 0 warnings from `state_broker` (pre-existing lib warnings remain) |
 | `cargo clippy --bin crosslink` | 1 pedantic warning in the new code (`needless_pass_by_value` on the command dispatcher), matching the existing command-module pattern |
@@ -245,6 +245,26 @@ cache; no source changes to the preserved branch):
 Repo-wide `cargo fmt --all` was **not** applied: the preserved baseline is not
 fmt-clean (unrelated files would churn). `rustfmt` was applied to the new and
 touched files only.
+
+## 7.1 Independent review
+
+An independent read-only adversarial review by `opencode-go/hy3` (operator
+approved per launch; catalog refreshed 2026-09-21) examined the module, tests,
+and this document against the broker contract source. Findings and
+dispositions are recorded in full in `handoffs/802-review-hy3.md`. Summary:
+
+- **major** — `commit_cas`'s `already_applied` branch reported `verified` from
+  path presence instead of comparing digests against the intended payload;
+  fixed with a regression test.
+- **minor** (×2) — the loopback stub was more lenient than the real broker
+  (head-only verify, no commit-body validation); the stub now keeps commit
+  history and re-validates inputs independently.
+- **nit** (×2) — `SecretToken::expose` narrowed to `pub(crate)`; message
+  validation now matches the broker's exact control-character rule.
+
+The reviewer's contract-conformance, secret-safety, projection-safety, and
+integration-point verdicts were clean. It ran no tests and made no live broker
+call (disclosed).
 
 ## 8. Next step: live verification (after the Codex Cloud durability experiment passes)
 

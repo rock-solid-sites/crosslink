@@ -203,7 +203,8 @@ later is an adapter implementation plus call-site routing — no redesign of
   verified against the stub and exercised through `commit_cas`.
 - Read-back mismatch (`upstream_error` with `details.failed_paths`) is surfaced
   as non-retryable with the commit sha preserved, per the contract's "reconcile
-  before retrying".
+  before retrying"; an explicit `retryable: false` from the broker is never
+  overridden by a code default (regression-tested).
 - No incompatibility with the deployed broker contract was found in this work.
 
 ## 6. Configuration reference
@@ -227,7 +228,7 @@ cache; no source changes to the preserved branch):
 |---|---|
 | `cargo test --lib state_broker` | 40 passed, 0 failed |
 | `cargo test --bin crosslink state_broker` | 41 passed, 0 failed |
-| `cargo test --test state_broker_contract` | 6 passed, 0 failed (real HTTP over 127.0.0.1) |
+| `cargo test --test state_broker_contract` | 7 passed, 0 failed (real HTTP over 127.0.0.1) |
 | `cargo test --test state_broker_live` | 0 run, 1 ignored (live probe; requires operator env) |
 | `cargo clippy --lib` | 0 warnings from `state_broker` (pre-existing lib warnings remain) |
 | `cargo clippy --bin crosslink` | 1 pedantic warning in the new code (`needless_pass_by_value` on the command dispatcher), matching the existing command-module pattern |

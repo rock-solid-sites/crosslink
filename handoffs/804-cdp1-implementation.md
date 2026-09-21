@@ -4,6 +4,7 @@ title: CDP-1 derived-checkpoint publish path — implementation handoff
 status: complete — ready for independent implementation review
 branch: feat/pp3g-804-cdp1
 base: fix/pp3g-802-decision-independent-hardening @ d4105831e
+adapter_integration: feature/pp3g-state-broker-adapter @ 89a59a52b merged at c11059880 (no conflicts)
 protocol_revision: design/pp3g-802-derived-publish @ 7e3f71f94
 date: 2026-09-21
 ---
@@ -159,8 +160,8 @@ All tests are deterministic and offline; live L1/L2 remain out of CI.
 
 | Command | Result |
 |---|---|
-| `cargo test --lib state_broker` | 150 passed, 0 failed |
-| `cargo test --bin crosslink state_broker` | 151 passed, 0 failed |
+| `cargo test --lib state_broker` | 152 passed, 0 failed |
+| `cargo test --bin crosslink state_broker` | 153 passed, 0 failed |
 | `cargo test --lib hub_v3` | 54 passed, 0 failed |
 | `cargo test --test state_broker_contract` | 21 passed, 0 failed (5 CDP-1 loopback) |
 | `cargo test --test state_broker_live` | 0 run, 3 ignored (read-only probes) |
@@ -229,6 +230,28 @@ None. Two clarifications where the protocol left room:
 
 ## 10. Final commit
 
-`f275d613e` on `feat/pp3g-804-cdp1` (5 commits from the hardening base:
-`4e30c7d04`, `51d9750a1`, `c6de2c4ed`, `ea9677448`, `f275d613e`). No push was
-performed. No live broker operation was performed.
+`74f989c99` on `feat/pp3g-804-cdp1` (5 commits from the hardening base:
+`4e30c7d04`, `51d9750a1`, `c6de2c4ed`, `ea9677448`, `f275d613e`, plus the
+handoff commit). No push was performed. No live broker operation was performed.
+
+## 11. Adapter-tip integration
+
+The final adapter branch tip (`feature/pp3g-state-broker-adapter` @ `89a59a52b`,
+which already contains the hardening tip `d4105831e`) was merged into CDP-1 at
+`c11059880`:
+
+- **No conflicts.** The net delta of the two adapter commits
+  (`66eade87c`, `89a59a52b`) is `handoffs/802-hardening.md` only; the
+  proptest-seed files are added and then removed, so they do not appear in the
+  merge. CDP-1 touches neither file.
+- **`89a59a52b` is an ancestor of the new CDP-1 HEAD** (verified with
+  `git merge-base --is-ancestor`).
+- **The reviewed CDP-1 implementation is unchanged:** `git diff 74f989c99..HEAD`
+  contains exactly `handoffs/802-hardening.md`; no `state_broker/`, `cdp1/`,
+  `hub_v3.rs`, CLI, test, `Cargo`, or frozen-spec file changed.
+- **Post-merge focused suites (behavior unchanged):** `--lib
+  state_broker::cdp1` 72 passed; `--lib state_broker` 152 passed; `--bin
+  crosslink state_broker` 153 passed; `--lib hub_v3` 54 passed; `--test
+  state_broker_contract` 21 passed; `--test state_broker_live` 3 ignored;
+  focused `cli_integration` CDP-1 tests 2 passed; `git diff --check` clean.
+- No protocol change, no feature work, no `SyncManager`, no live write, no push.

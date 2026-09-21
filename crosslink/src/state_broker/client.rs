@@ -488,6 +488,12 @@ impl StateBrokerClient {
         &self.config
     }
 
+    /// Host-only label of the configured broker (never the token or a path).
+    #[must_use]
+    pub fn backend_host(&self) -> String {
+        host_label(self.config.base_url())
+    }
+
     /// Liveness probe (unauthenticated).
     ///
     /// # Errors
@@ -533,8 +539,7 @@ impl StateBrokerClient {
     ///
     /// [`BrokerErrorCode::IdentityMismatch`]: super::error::BrokerErrorCode::IdentityMismatch
     pub fn state(&self) -> Result<ProjectState, StateBrokerError> {
-        let state: ProjectState =
-            self.get(&self.state_url(), &[])?;
+        let state: ProjectState = self.get(&self.state_url(), &[])?;
         if state.project.uuid != self.config.project_uuid() {
             return Err(StateBrokerError::identity_mismatch(format!(
                 "broker state belongs to project {} but this client is configured for {}",
@@ -632,8 +637,8 @@ impl StateBrokerClient {
     ///
     /// [`BrokerErrorCode::InvalidInput`] for locally-rejected input,
     /// [`BrokerErrorCode::ReconcileRequired`] for an ambiguous write, plus
-    /// definite rejections (unauthorized / scope_violation / not_found /
-    /// method_not_allowed / stale_state) and transport failures before the
+    /// definite rejections (`unauthorized`, `scope_violation`, `not_found`,
+    /// `method_not_allowed`, `stale_state`) and transport failures before the
     /// request could be sent.
     ///
     /// [`BrokerErrorCode::InvalidInput`]: super::error::BrokerErrorCode::InvalidInput
@@ -666,7 +671,7 @@ impl StateBrokerClient {
             Err(error) => return Err(self.classify_commit_failure(request, error)),
         };
         if !outcome.verified {
-            return Err(self.reconcile_required_for_outcome(
+            return Err(reconcile_required_for_outcome(
                 request,
                 &outcome,
                 "verified_false",
@@ -686,16 +691,24 @@ impl StateBrokerClient {
     ) -> StateBrokerError {
         use super::error::BrokerErrorCode;
         match error.code() {
-            // The broker rejected the request before writing.
+            // Definite rejections and already-classified client errors pass
+            // through unchanged; the broker rejected the request (or the
+            // failure never got that far).
             BrokerErrorCode::Unauthorized
             | BrokerErrorCode::ScopeViolation
             | BrokerErrorCode::InvalidInput
             | BrokerErrorCode::NotFound
             | BrokerErrorCode::MethodNotAllowed
-            | BrokerErrorCode::StaleState => error,
+            | BrokerErrorCode::StaleState
+            | BrokerErrorCode::Configuration
+            | BrokerErrorCode::LocalIo
+            | BrokerErrorCode::ReconcileRequired
+            | BrokerErrorCode::IdentityMismatch => error,
             // Ambiguous: the write may have landed (or the broker landed it and
             // failed while reading back).
-            BrokerErrorCode::Transport | BrokerErrorCode::Protocol | BrokerErrorCode::InternalError => {
+            BrokerErrorCode::Transport
+            | BrokerErrorCode::Protocol
+            | BrokerErrorCode::InternalError => {
                 let reason = if error.code() == BrokerErrorCode::Transport {
                     "transport_ambiguous"
                 } else {
@@ -706,11 +719,6 @@ impl StateBrokerClient {
             BrokerErrorCode::UpstreamError => {
                 self.reconcile_required_for_error(request, &error, "readback_mismatch")
             }
-            // Already classified.
-            BrokerErrorCode::Configuration
-            | BrokerErrorCode::LocalIo
-            | BrokerErrorCode::ReconcileRequired
-            | BrokerErrorCode::IdentityMismatch => error,
         }
     }
 
@@ -732,13 +740,7 @@ impl StateBrokerClient {
         }
         details.insert(
             "paths".to_string(),
-            Value::Array(
-                request
-                    .paths()
-                    .into_iter()
-                    .map(Value::String)
-                    .collect(),
-            ),
+            Value::Array(request.paths().into_iter().map(Value::String).collect()),
         );
         if let Some(previous) = error.details() {
             for key in ["commit", "failed_paths", "observed_head"] {
@@ -753,33 +755,6 @@ impl StateBrokerClient {
             ),
             Some(Value::Object(details)),
         )
-    }
-
-    /// Build a `reconcile_required` error from a received but unverified
-    /// success outcome.
-    fn reconcile_required_for_outcome(
-        &self,
-        request: &CommitRequest,
-        outcome: &CommitOutcome,
-        reason: &str,
-        message: &str,
-    ) -> StateBrokerError {
-        let failed_paths: Vec<Value> = outcome
-            .files
-            .iter()
-            .filter(|file| !file.verified)
-            .map(|file| Value::String(file.path.clone()))
-            .collect();
-        let mut details = serde_json::Map::new();
-        details.insert("reason".to_string(), Value::String(reason.to_string()));
-        details.insert("commit".to_string(), Value::String(outcome.commit.clone()));
-        if let Some(op_id) = &request.op_id {
-            details.insert("op_id".to_string(), Value::String(op_id.clone()));
-        }
-        if !failed_paths.is_empty() {
-            details.insert("failed_paths".to_string(), Value::Array(failed_paths));
-        }
-        StateBrokerError::reconcile_required(message.to_string(), Some(Value::Object(details)))
     }
 
     fn state_url(&self) -> String {
@@ -884,6 +859,32 @@ impl StateBrokerClient {
             envelope.operation,
         ))
     }
+}
+
+/// Build a `reconcile_required` error from a received but unverified success
+/// outcome.
+fn reconcile_required_for_outcome(
+    request: &CommitRequest,
+    outcome: &CommitOutcome,
+    reason: &str,
+    message: &str,
+) -> StateBrokerError {
+    let failed_paths: Vec<Value> = outcome
+        .files
+        .iter()
+        .filter(|file| !file.verified)
+        .map(|file| Value::String(file.path.clone()))
+        .collect();
+    let mut details = serde_json::Map::new();
+    details.insert("reason".to_string(), Value::String(reason.to_string()));
+    details.insert("commit".to_string(), Value::String(outcome.commit.clone()));
+    if let Some(op_id) = &request.op_id {
+        details.insert("op_id".to_string(), Value::String(op_id.clone()));
+    }
+    if !failed_paths.is_empty() {
+        details.insert("failed_paths".to_string(), Value::Array(failed_paths));
+    }
+    StateBrokerError::reconcile_required(message.to_string(), Some(Value::Object(details)))
 }
 
 /// Host-only label for an error message (never the full URL).

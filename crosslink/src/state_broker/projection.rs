@@ -51,6 +51,11 @@ pub struct ProjectionFile {
 pub struct ProjectionMarker {
     /// Marker schema; see [`PROJECTION_MARKER_SCHEMA`].
     pub schema: String,
+    /// Backend host the projection came from (host-only label), when the
+    /// transport has one. Binds the projection to a backend instance, not just
+    /// a project UUID.
+    #[serde(default)]
+    pub backend_host: Option<String>,
     /// Broker project UUID the projection came from.
     pub project_uuid: String,
     /// Durable state ref the projection came from.
@@ -229,6 +234,17 @@ where
                 state.state.state_ref,
             )));
         }
+        if let (Some(previous_host), Some(current_host)) = (
+            previous.backend_host.as_deref(),
+            transport.backend_host().as_deref(),
+        ) {
+            if previous_host != current_host {
+                return Err(StateBrokerError::identity_mismatch(format!(
+                    "projection directory {} belongs to backend {previous_host}, not {current_host}",
+                    dir.display()
+                )));
+            }
+        }
     }
 
     std::fs::create_dir_all(dir).map_err(|e| {
@@ -242,6 +258,7 @@ where
     // hydration must never leave a complete-looking projection.
     let mut marker = ProjectionMarker {
         schema: PROJECTION_MARKER_SCHEMA.to_string(),
+        backend_host: transport.backend_host(),
         project_uuid: state.project.uuid.clone(),
         state_ref: state.state.state_ref.clone(),
         head_commit: head.commit.clone(),
@@ -255,7 +272,12 @@ where
     let mut total: u64 = 0;
     for path in &selected {
         let blob = transport.read_blob(path, Some(&head.commit))?;
-        check_blob(&blob, path, &head.commit, inventory.get(path.as_str()).copied())?;
+        check_blob(
+            &blob,
+            path,
+            &head.commit,
+            inventory.get(path.as_str()).copied(),
+        )?;
         // `bytes()` verifies the envelope digest/size before anything is written.
         let bytes = blob.bytes()?;
         let relative = projection_relative_path(path)?;
@@ -411,6 +433,17 @@ where
             state.state.state_ref,
         )));
     }
+    if let (Some(marked_host), Some(current_host)) = (
+        marker.backend_host.as_deref(),
+        transport.backend_host().as_deref(),
+    ) {
+        if marked_host != current_host {
+            return Err(StateBrokerError::identity_mismatch(format!(
+                "projection in {} belongs to backend {marked_host}, but the transport is {current_host}",
+                dir.display()
+            )));
+        }
+    }
     let current_head = state.state.head.as_ref().map(|head| head.commit.as_str());
     if Some(marker.head_commit.as_str()) != current_head {
         return Err(StateBrokerError::local_io(format!(
@@ -481,7 +514,7 @@ mod tests {
         assert!(check_blob(&wrong_size, "a/b.json", &commit, Some(&entry)).is_err());
 
         // The blob's self-digest is still enforced by `bytes()`.
-        let mut wrong_digest = blob.clone();
+        let mut wrong_digest = blob;
         wrong_digest.sha256 = "f".repeat(64);
         assert!(wrong_digest.bytes().is_err());
     }
@@ -492,6 +525,7 @@ mod tests {
         std::fs::write(dir.path().join("a.json"), b"one").unwrap();
         let marker = ProjectionMarker {
             schema: PROJECTION_MARKER_SCHEMA.to_string(),
+            backend_host: None,
             project_uuid: "1d440dcf-bcbf-4d1a-987c-d5334568a716".to_string(),
             state_ref: "refs/heads/projects/x/state".to_string(),
             head_commit: "c".repeat(40),

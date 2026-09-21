@@ -79,6 +79,7 @@ fn hydrate_into_writes_a_disposable_projection_with_a_marker() {
     let marker = read_projection_marker(&root).unwrap().expect("marker");
     assert!(marker.complete);
     assert_eq!(marker.project_uuid, UUID);
+    assert_eq!(marker.backend_host.as_deref(), Some("mock.invalid"));
     assert_eq!(marker.state_ref, mock.state_ref());
     assert_eq!(marker.head_commit, mock.head().unwrap());
     assert_eq!(marker.files.len(), 2);
@@ -156,6 +157,25 @@ fn projection_of_another_project_is_refused() {
     assert!(error.is_identity_mismatch(), "{error:?}");
 }
 
+/// A projection must not silently move between backend instances that share a
+/// project UUID: the marker records the backend host.
+#[test]
+fn projection_of_another_backend_is_refused() {
+    let mock = bootstrap_mock();
+    let dir = tempfile::tempdir().unwrap();
+    mock.hydrate_into(dir.path(), None).unwrap();
+
+    let mut marker = read_projection_marker(dir.path()).unwrap().expect("marker");
+    marker.backend_host = Some("other.invalid".to_string());
+    let body = serde_json::to_vec_pretty(&marker).unwrap();
+    std::fs::write(dir.path().join(PROJECTION_MARKER_FILE), body).unwrap();
+
+    let error = mock.verify_projection(dir.path()).unwrap_err();
+    assert!(error.is_identity_mismatch(), "{error:?}");
+    let error = mock.hydrate_into(dir.path(), None).unwrap_err();
+    assert!(error.is_identity_mismatch(), "{error:?}");
+}
+
 #[test]
 fn interrupted_hydration_leaves_an_incomplete_marker() {
     let mock = bootstrap_mock();
@@ -166,9 +186,16 @@ fn interrupted_hydration_leaves_an_incomplete_marker() {
     assert_eq!(error.code(), BrokerErrorCode::Transport);
 
     let marker = read_projection_marker(dir.path()).unwrap().expect("marker");
-    assert!(!marker.complete, "an interrupted hydration must not look complete");
+    assert!(
+        !marker.complete,
+        "an interrupted hydration must not look complete"
+    );
     let error = mock.verify_projection(dir.path()).unwrap_err();
-    assert!(error.message().contains("incomplete"), "{}", error.message());
+    assert!(
+        error.message().contains("incomplete"),
+        "{}",
+        error.message()
+    );
 }
 
 #[test]
@@ -180,7 +207,11 @@ fn corrupt_marker_fails_closed() {
 
     let error = mock.verify_projection(dir.path()).unwrap_err();
     assert_eq!(error.code(), BrokerErrorCode::LocalIo);
-    assert!(error.message().contains("not valid JSON"), "{}", error.message());
+    assert!(
+        error.message().contains("not valid JSON"),
+        "{}",
+        error.message()
+    );
 }
 
 #[test]
@@ -263,17 +294,20 @@ fn commit_cas_refuses_a_same_path_rebase() {
         ReconcileReason::OverlappingPaths { paths } => assert_eq!(paths, &[ours.to_string()]),
         other => panic!("expected OverlappingPaths, got {other:?}"),
     }
-    assert_eq!(resolution.attempts(), 1, "no write was attempted after the proof failed");
+    assert_eq!(
+        resolution.attempts(),
+        1,
+        "no write was attempted after the proof failed"
+    );
     assert_eq!(
         mock.file_bytes(ours).unwrap(),
         br#"{"theirs":true}"#,
         "the competing writer's bytes must survive"
     );
-    assert!(
-        mock.commit_message(&mock.head().unwrap())
-            .unwrap()
-            .contains("checkpoint: theirs")
-    );
+    assert!(mock
+        .commit_message(&mock.head().unwrap())
+        .unwrap()
+        .contains("checkpoint: theirs"));
 }
 
 /// Equivalent content is a valid proof: if the observed payload already equals
@@ -286,11 +320,7 @@ fn commit_cas_allows_a_same_path_rebase_when_content_is_equivalent() {
     let intended = br#"{"ok":true}"#.to_vec();
 
     // The competing writer landed exactly the bytes we intend to write.
-    mock.inject_competing_commit(
-        [(ours, intended.clone())],
-        "checkpoint: same bytes",
-        None,
-    );
+    mock.inject_competing_commit([(ours, intended.clone())], "checkpoint: same bytes", None);
 
     let request = CommitRequest::single(
         ours,
@@ -418,7 +448,11 @@ fn commit_cas_reconciles_an_ambiguous_write_that_landed() {
         CasResolution::AlreadyApplied { commit, .. } => assert_eq!(commit, &landed.commit),
         other => panic!("expected AlreadyApplied, got {other:?}"),
     }
-    assert_eq!(mock.commit_count(), 1, "reconciliation must not write again");
+    assert_eq!(
+        mock.commit_count(),
+        1,
+        "reconciliation must not write again"
+    );
 }
 
 #[test]
@@ -491,6 +525,86 @@ fn commit_cas_refuses_to_bootstrap_over_a_deleted_ref() {
         other => panic!("expected OverlapUnprovable, got {other:?}"),
     }
     assert!(mock.head().is_none(), "no bootstrap write was issued");
+}
+
+#[test]
+fn commit_cas_reports_a_head_that_moves_during_reconciliation() {
+    use std::cell::Cell;
+
+    use super::client::{ProjectState, StateBlob, VerifiedEntry};
+
+    /// Wraps the mock and simulates a head move between the reconciliation read
+    /// and the verdict re-check (the verify-after-read TOCTOU window).
+    struct MoveHeadOnRecheck {
+        inner: MockStateTransport,
+        reads: Cell<u8>,
+        moved: Cell<bool>,
+    }
+
+    impl ProjectStateTransport for MoveHeadOnRecheck {
+        fn read_state(&self) -> Result<ProjectState, StateBrokerError> {
+            let reads = self.reads.get() + 1;
+            self.reads.set(reads);
+            if reads == 2 && !self.moved.get() {
+                self.moved.set(true);
+                self.inner.inject_competing_commit(
+                    [("checkpoints/moved.json", b"{}".to_vec())],
+                    "moved during reconcile",
+                    None,
+                );
+            }
+            self.inner.read_state()
+        }
+
+        fn read_blob(&self, path: &str, at: Option<&str>) -> Result<StateBlob, StateBrokerError> {
+            self.inner.read_blob(path, at)
+        }
+
+        fn verify(
+            &self,
+            commit: &str,
+            paths: &[String],
+        ) -> Result<Vec<VerifiedEntry>, StateBrokerError> {
+            self.inner.verify(commit, paths)
+        }
+
+        fn commit(
+            &self,
+            request: &CommitRequest,
+        ) -> Result<super::client::CommitOutcome, StateBrokerError> {
+            self.inner.commit(request)
+        }
+    }
+
+    let mock = bootstrap_mock();
+    let base_head = mock.head().unwrap();
+    mock.commit(&CommitRequest::single(
+        "checkpoints/ours.json",
+        br#"{"ours":true}"#.to_vec(),
+        Some(base_head.clone()),
+        "checkpoint: ours",
+        Some("op-ours".to_string()),
+    ))
+    .expect("direct commit");
+
+    let transport = MoveHeadOnRecheck {
+        inner: mock.clone(),
+        reads: Cell::new(0),
+        moved: Cell::new(false),
+    };
+    let stale_call = CommitRequest::single(
+        "checkpoints/ours.json",
+        br#"{"ours":true}"#.to_vec(),
+        Some(base_head),
+        "checkpoint: ours",
+        Some("op-ours".to_string()),
+    );
+    let resolution = transport.commit_cas(&stale_call, 1).expect("verdict");
+    assert!(!resolution.is_verified());
+    match expect_reconcile_required(&resolution) {
+        ReconcileReason::HeadMovedDuringReconcile => {}
+        other => panic!("expected HeadMovedDuringReconcile, got {other:?}"),
+    }
 }
 
 #[test]
@@ -617,7 +731,8 @@ fn broker_projection_feeds_existing_state_hydration() {
     let projection = dir.path().join("state-projection");
     mock.hydrate_into(&projection, None).expect("hydrate");
     // The projection is only trustworthy after the freshness gate passes.
-    mock.verify_projection(&projection).expect("fresh projection");
+    mock.verify_projection(&projection)
+        .expect("fresh projection");
 
     let read_back = crate::checkpoint::read_checkpoint(&projection).expect("read checkpoint");
     let db = crate::db::Database::open(Path::new(":memory:")).unwrap();

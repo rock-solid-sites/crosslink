@@ -450,7 +450,10 @@ mod tests {
                 !BrokerErrorCode::CONTRACT_CODES.contains(&client_code),
                 "{client_code} must not be treated as a broker wire code"
             );
-            assert_eq!(BrokerErrorCode::from_contract_str(client_code.as_str()), None);
+            assert_eq!(
+                BrokerErrorCode::from_contract_str(client_code.as_str()),
+                None
+            );
         }
     }
 

@@ -1,6 +1,7 @@
 # Crosslink State Broker transport adapter
 
-Status: implemented (Crosslink issue #802)
+Status: implemented (Crosslink issue #802); decision-independent review
+hardening applied (branch `fix/pp3g-802-decision-independent-hardening`).
 Branch: `feature/pp3g-state-broker-adapter`
 Baseline: `feature/pp3g-Zbk6-cleanup-rescope-349` @ `d323f020dd1a592113d71ebdb1facefb4b426a18`
 Parent context: ASES Crosslink issue #564
@@ -61,37 +62,76 @@ state_broker/
   tests.rs      cross-cutting unit tests
 ```
 
-### 3.1 The narrow seam: `ProjectStateTransport`
+### 3.1 The broker-v1-shaped transport seam: `ProjectStateTransport`
 
-Five operations, matching the broker contract semantically:
+The trait names the broker contract's semantic operations. It is a broker-v1
+CAS transport, not a Crosslink-domain persistence seam: the mapping from v3
+per-agent refs onto one whole-tree CAS is the open §4 decision, and nothing in
+this shape pre-answers it.
 
 | Method | Broker op | Notes |
 |---|---|---|
-| `read_state()` | `GET .../state` | ref, head, inventory, baseline, registry |
+| `read_state()` | `GET .../state` | ref, head, inventory, baseline; project UUID and state ref are checked against configuration |
 | `read_blob(path, at)` | `GET .../blob` | `at` = exact commit or head |
 | `verify(commit, paths)` | `GET .../verify` | read-back digests (≤32 paths) |
-| `commit(request)` | `POST .../commit` | expected-head CAS; **never blind-retried** |
-| `hydrate_into(dir, paths)` | (provided) | materializes blobs into a caller-chosen directory |
+| `commit(request)` | `POST .../commit` | expected-head CAS; **never blind-retried**; ambiguous failures become `reconcile_required` |
+| `hydrate_into(dir, paths)` | (provided) | materializes blobs into a caller-chosen projection; checks each blob against the inventory (path, commit, blob sha, size) and writes an identity/freshness marker |
+| `verify_projection(dir)` | (provided) | fail-closed gate: missing/incomplete/stale/tampered/wrong-project projections are errors |
+| `reconcile(request)` | (provided) | explicit op-id reconciliation: landed / not-landed / landed-with-different-content |
+| `commit_cas(request, max_retries)` | (provided) | reconciled CAS; see below |
 
-`commit_cas(request, max_retries)` is a provided method that reconciles
-`stale_state` conservatively:
+`commit_cas` returns a `CasResolution` verdict:
 
-1. re-read the durable head once;
-2. if the head commit's trailers record **our own `op_id`** (`Broker-Op:`) the
-   write already landed → verify our paths at that head and return
-   `already_applied: true` without writing;
-3. otherwise re-issue with the freshly observed head (whole-file upserts only).
+1. `Applied` — our write landed and read-back verified it.
+2. `AlreadyApplied` — the head already records our `op_id` and every requested
+   path matches the intended payload byte-for-byte. Only then is a replay
+   treated as success; `previous_head` is **not** fabricated.
+3. `ReconcileRequired` — never an ordinary success and never a blind retry:
+   - `AmbiguousWrite` — timeout/lost/unparseable response, upstream read-back
+     mismatch, `verified: false`, or a reconciliation read that failed;
+   - `WriteNotLanded` — reconciliation proved the write is not at the head but
+     the retry budget was exhausted;
+   - `OpIdReusedWithDifferentContent` — the head records our op id with other
+     bytes (reused op id or later overwrite);
+   - `OverlappingPaths` / `OverlapUnprovable` — a competing commit touched a
+     requested path (or the proof could not be read), so rebasing would discard
+     another writer's bytes;
+   - `HeadMovedDuringReconcile` — the head moved between the verdict and its
+     re-check.
 
-`op_id` is mandatory for `commit_cas`; callers with append-style semantics must
-use `commit()` and reconcile explicitly. This mirrors the broker README's
-"never blind-retry a write" rule.
+**Automatic rebase is refused unless non-overlap is proven.** On a conflict the
+retry compares per-path digests at the base and observed heads (`verify` at
+both commits); it re-issues only when every requested path is unchanged, or
+already carries exactly the intended payload. A vanished ref is never
+"rebased" by bootstrapping a fresh history over it.
 
-### 3.2 Local projections are disposable — and existing code can consume them
+`op_id` is mandatory for `commit_cas`/`reconcile`. Uniqueness is a caller
+obligation: one op id identifies one intended payload for one writer; reuse
+with different content is detected, never accepted. Callers with append-style
+semantics must use `commit()` and reconcile explicitly.
+
+### 3.2 Local projections are disposable, self-identifying, and freshness-bound
 
 `hydrate_into` writes state files under a caller-chosen root (default:
 `.crosslink/state-projection/`, via `default_projection_dir`). It never touches
 `SQLite`, never commits to git, and the projection may be deleted at any time:
 the durable head is always re-read from the transport.
+
+Every projection carries a marker file
+(`.crosslink-state-projection+v1.json`, deliberately outside the broker path
+grammar) recording:
+
+- the broker project UUID and state ref (backend/project binding);
+- the head commit the projection was materialized from;
+- the logical path, size, and SHA-256 of every projected file;
+- a `complete` flag that is set only after the last file is on disk.
+
+The marker is written *incomplete* before the first file, so an interrupted
+hydration can never look complete. `verify_projection(dir)` is the fail-closed
+gate for consumers: it refuses a missing, incomplete, stale, tampered, or
+wrong-project projection. Re-hydrating a directory upserts the selection and
+removes files that a previous marker listed but the new selection excludes.
+Two projections of different projects cannot share a directory.
 
 The unit test `broker_projection_feeds_existing_state_hydration` executes the
 claim: a broker projection containing the v3 checkpoint
@@ -120,6 +160,13 @@ them for its own client, and Crosslink must not silently change where durable
 state goes. There is no silent fallback either — a misconfigured broker
 selection fails loudly.
 
+Concretely, a present-but-unparsable `hook-config.json` **fails hard when the
+raw text mentions `state_backend`** (the file may have selected the broker and
+falling back to Local would silently route durable state to the wrong store).
+When the raw text does not mention the key, the file cannot have selected a
+backend: the adapter warns and keeps Local, so unrelated config damage does not
+become a hard failure.
+
 ### 3.4 Secret handling
 
 - `SecretToken` redacts itself in `Debug`, implements neither `Display` nor
@@ -140,7 +187,6 @@ selection fails loudly.
 
 - `crosslink state-broker status` (`src/commands/state_broker.rs`) — read-only
   operator/live-test entry point (whoami + state; never commits).
-- `state_broker::transport_from_env()` — construction for programmatic callers.
 - Tests: `tests/state_broker_contract.rs` (loopback stub) and
   `tests/state_broker_live.rs` (ignored, read-only live probe).
 
@@ -183,16 +229,19 @@ later is an adapter implementation plus call-site routing — no redesign of
 - The broker has **no delete operation** in v1 (`commit` upserts only). State
   that must be *removed* needs a tombstone convention or a broker contract
   change; Crosslink's hub prune/rewrite paths are therefore out of scope for
-  the broker transport.
+  the broker transport. (Still unresolved; deliberately not decided here.)
 - Concurrency: the broker's CAS is a whole-ref compare-and-swap with retry
-  semantics, unlike v3's per-agent refs. Single-writer-per-op-id is assumed for
-  `commit_cas` (the op-id trailer check is the reconciliation authority).
+  semantics, unlike v3's per-agent refs. `op_id` uniqueness is a **caller
+  obligation**; `commit_cas` detects same-op/different-content and refuses
+  automatic rebases that cannot be proven non-overlapping.
 - The full Crosslink hub tree (event logs, checkpoints, meta, locks) has not
   been round-tripped through the broker; only the transport semantics and the
   v3-checkpoint projection path are proven.
 - `hook-config.json`'s `state_backend` key is read but deliberately not
   registered in the config registry/TUI in this change (env is the primary
   selector). `crosslink config get state_backend` will not know it yet.
+- Path ownership (which broker paths are agent-private vs shared) remains
+  unstate; `commit_cas` is safe only where the non-overlap proof holds.
 
 ## 5. Broker compatibility notes
 
@@ -205,10 +254,17 @@ later is an adapter implementation plus call-site routing — no redesign of
   pointless round-trips.
 - `stale_state` (409) carries `details.observed_head` and writes nothing —
   verified against the stub and exercised through `commit_cas`.
-- Read-back mismatch (`upstream_error` with `details.failed_paths`) is surfaced
-  as non-retryable with the commit sha preserved, per the contract's "reconcile
-  before retrying"; an explicit `retryable: false` from the broker is never
-  overridden by a code default (regression-tested).
+- **Write ambiguity is typed.** On `POST /commit`, transport failures,
+  unparseable responses, `internal_error`, `upstream_error`, and success
+  envelopes with `verified: false` all surface as
+  `BrokerErrorCode::ReconcileRequired` (`details.reason` = `transport_ambiguous`
+  | `response_ambiguous` | `readback_mismatch` | `verified_false`), never as an
+  ordinary error or success. Definite rejections (401/403/400/404/405/409) pass
+  through unchanged. `upstream_error` defaults to non-retryable, matching the
+  broker's own default (`errors.ts`: `options.retryable ?? false`).
+- Broker-reported project identity is bound to configuration: `whoami()` and
+  `state()` reject a project UUID or state ref that contradicts the configured
+  identity (`identity_mismatch`).
 - No incompatibility with the deployed broker contract was found in this work.
 
 ## 6. Configuration reference
@@ -290,9 +346,10 @@ tests use per-test tempdirs only.
    (reads `health`, `whoami`, `state`; performs zero writes).
 4. First write (separate, reviewed step): hydrate the full state tree into a
    disposable projection with `hydrate_into`, then CAS a single checkpoint file
-   through `commit_cas`; assert `outcome.verified` and re-verify with
-   `verify()`. This is the moment to validate the §4 mapping decision for the
-   hub before `SyncManager` is routed to the broker.
+   through `commit_cas`; assert the `CasResolution` is `Applied`/`AlreadyApplied`
+   (`is_verified()`) and re-verify with `verify()`/`verify_projection()`. This
+   is the moment to validate the §4 mapping decision for the hub before
+   `SyncManager` is routed to the broker.
 
 ## 9. Changed paths
 

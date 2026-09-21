@@ -92,8 +92,7 @@ impl MockStateTransport {
             state.counter += 1;
             let paths: Vec<String> = state.files.keys().cloned().collect();
             let commit = next_commit_sha(&state, &paths);
-            let message =
-                "mock: bootstrap\n\nProject-UUID: mock\nBroker: mock\n".to_string();
+            let message = "mock: bootstrap\n\nProject-UUID: mock\nBroker: mock\n".to_string();
             state.head = Some(commit.clone());
             let snapshot = state.files.clone();
             state.history.insert(
@@ -444,6 +443,10 @@ impl ProjectStateTransport for MockStateTransport {
             verified: true,
         })
     }
+
+    fn backend_host(&self) -> Option<String> {
+        Some("mock.invalid".to_string())
+    }
 }
 
 /// Deterministic commit sha for the mock's next commit.
@@ -563,10 +566,16 @@ mod tests {
             .verify(&first, &["a.json".to_string(), "b.json".to_string()])
             .unwrap();
         assert!(entries[0].is_verified());
-        assert!(!entries[1].present, "b.json did not exist at the first commit");
+        assert!(
+            !entries[1].present,
+            "b.json did not exist at the first commit"
+        );
 
         let blob = mock.read_blob("a.json", Some(&first)).unwrap();
-        assert_eq!(blob.commit, first, "the blob must report the commit it was read at");
+        assert_eq!(
+            blob.commit, first,
+            "the blob must report the commit it was read at"
+        );
         assert_eq!(blob.bytes().unwrap(), b"one");
 
         let unknown = mock.verify(&"c".repeat(40), &["a.json".to_string()]);

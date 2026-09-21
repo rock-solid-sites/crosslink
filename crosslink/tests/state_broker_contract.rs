@@ -806,9 +806,8 @@ fn stub_message_ok(message: &str) -> bool {
     !["Project-UUID:", "Broker:", "Broker-Op:"]
         .iter()
         .any(|trailer| {
-            trimmed.as_bytes().len() >= trailer.len()
-                && trimmed.as_bytes()[..trailer.len()]
-                    .eq_ignore_ascii_case(trailer.as_bytes())
+            trimmed.len() >= trailer.len()
+                && trimmed.as_bytes()[..trailer.len()].eq_ignore_ascii_case(trailer.as_bytes())
         })
 }
 

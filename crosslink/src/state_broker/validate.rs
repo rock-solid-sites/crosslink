@@ -265,7 +265,10 @@ pub fn escape_windows_segment(segment: &str, windows: bool) -> Option<String> {
 #[must_use]
 pub fn unescape_windows_segment(escaped: &str) -> String {
     let stripped_prefix = escaped.strip_prefix('~').unwrap_or(escaped);
-    stripped_prefix.strip_suffix('~').unwrap_or(stripped_prefix).to_string()
+    stripped_prefix
+        .strip_suffix('~')
+        .unwrap_or(stripped_prefix)
+        .to_string()
 }
 
 #[cfg(test)]
@@ -356,8 +359,8 @@ mod tests {
         assert_eq!(escape_windows_segment("agent-1", true), None);
 
         for segment in ["aux", "CON", "a.", "nul.txt", "aux.", "agent-1"] {
-            let escaped = escape_windows_segment(segment, true)
-                .unwrap_or_else(|| segment.to_string());
+            let escaped =
+                escape_windows_segment(segment, true).unwrap_or_else(|| segment.to_string());
             assert_eq!(
                 unescape_windows_segment(&escaped),
                 segment,

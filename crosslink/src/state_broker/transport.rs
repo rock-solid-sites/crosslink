@@ -206,7 +206,7 @@ impl CasResolution {
 
     /// The commit of a verified resolution, when there is one.
     #[must_use]
-    pub fn commit(&self) -> Option<&str> {
+    pub const fn commit(&self) -> Option<&str> {
         match self {
             Self::Applied { outcome, .. } => Some(outcome.commit.as_str()),
             Self::AlreadyApplied { commit, .. } => Some(commit.as_str()),
@@ -321,6 +321,16 @@ pub trait ProjectStateTransport {
     /// See [`Self::read_state`].
     fn current_head(&self) -> Result<Option<String>, StateBrokerError> {
         Ok(self.read_state()?.state.head.map(|head| head.commit))
+    }
+
+    /// Host-only label of the backend instance this transport is bound to,
+    /// when the backend has one (the broker client returns its configured
+    /// host; the mock returns a fixed label).
+    ///
+    /// Recorded in projection markers so a projection cannot silently move
+    /// between backend instances that happen to share a project UUID.
+    fn backend_host(&self) -> Option<String> {
+        None
     }
 
     /// Materialize durable state files into `dir` (a disposable projection).
@@ -741,9 +751,7 @@ where
     let intended = intended_digests(request);
     let mut overlap = Vec::new();
     for path in &paths {
-        let base_entry = base
-            .as_ref()
-            .and_then(|entries| entries.get(path.as_str()));
+        let base_entry = base.as_ref().and_then(|entries| entries.get(path.as_str()));
         let observed_entry = observed.get(path.as_str());
         let base_present = base_entry.is_some_and(|entry| entry.present);
         let observed_present = observed_entry.is_some_and(|entry| entry.present);
@@ -805,6 +813,11 @@ impl ProjectStateTransport for StateBrokerClient {
     fn commit(&self, request: &CommitRequest) -> Result<CommitOutcome, StateBrokerError> {
         self.commit(request)
     }
+
+    fn backend_host(&self) -> Option<String> {
+        // Inherent method (config-derived label), as with `read_state`.
+        Some(self.backend_host())
+    }
 }
 
 #[cfg(test)]
@@ -842,10 +855,7 @@ mod tests {
             .label(),
             "overlap_unprovable"
         );
-        assert_eq!(
-            ReconcileReason::WriteNotLanded.label(),
-            "write_not_landed"
-        );
+        assert_eq!(ReconcileReason::WriteNotLanded.label(), "write_not_landed");
         assert_eq!(
             ReconcileReason::OpIdReusedWithDifferentContent.label(),
             "op_id_reused_with_different_content"

@@ -746,7 +746,11 @@ mod tests {
     #[test]
     fn non_string_selection_key_is_rejected() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("hook-config.json"), "{\"state_backend\": 7}").unwrap();
+        std::fs::write(
+            dir.path().join("hook-config.json"),
+            "{\"state_backend\": 7}",
+        )
+        .unwrap();
         let error = StateBackend::resolve_with(dir.path(), lookup_from(&[])).unwrap_err();
         assert_eq!(error.code(), BrokerErrorCode::Configuration);
         assert!(error.message().contains(HOOK_CONFIG_KEY));

@@ -43,7 +43,9 @@ the table for all three.
 | 3 | GLM-5.3-Flash | `opencode-go/glm-5.3-flash` | OpenCode Go | `high` | $0.15 / $0.50 / $0.03 / — | $60 | not used for training, 0-day retention |
 
 Operator approval: **per-launch, requested via the question tool before
-dispatch** (model, effort, deliverable, costs, privacy). No substitution or
+dispatch** (model, effort, deliverable, costs, privacy). Approved: Hy3 `high`,
+Qwen 3.8 Flash `xhigh` (operator re-confirmed `xhigh` after being told the
+model exposes no `high` variant), GLM-5.3-Flash `high`. No substitution or
 escalation without a fresh approval.
 
 Runtime: `opencode run --model <id> --variant <v> --dir <packet> --format json`

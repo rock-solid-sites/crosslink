@@ -103,8 +103,8 @@ pub fn dispatch(
             || pipeline_status_overview(crosslink_dir, json),
             |id| status(crosslink_dir, id),
         ),
-        KickoffCommands::Logs { agent, lines } => logs(crosslink_dir, &agent, lines),
-        KickoffCommands::Stop { agent, force } => stop(crosslink_dir, &agent, force),
+        KickoffCommands::Logs { agent, lines, model: _ } => logs(crosslink_dir, &agent, lines),
+        KickoffCommands::Stop { agent, force, model: _ } => stop(crosslink_dir, &agent, force),
         KickoffCommands::Plan {
             doc,
             issue,
@@ -130,7 +130,7 @@ pub fn dispatch(
             };
             plan(crosslink_dir, db, &plan_opts)
         }
-        KickoffCommands::ShowPlan { agent } => show_plan(crosslink_dir, &agent),
+        KickoffCommands::ShowPlan { agent, .. } => show_plan(crosslink_dir, &agent),
         KickoffCommands::Report {
             agent,
             json: report_json,

@@ -1,10 +1,11 @@
-// E-ana tablet — design command: launch foreground Claude session for design doc authoring
+// E-ana tablet — design command: launch foreground agent session for design doc authoring
 use anyhow::{bail, Context, Result};
+use std::path::Path;
 use std::process::{Command, Stdio};
 
-/// Run `crosslink design` — launch a foreground Claude session with the /design skill prompt.
+/// Run `crosslink design` — launch a foreground agent session with the /design skill prompt.
 ///
-/// If called from inside Claude Code (detected via `CLAUDE_CODE` env var), prints
+/// If called from inside an agent session (detected via `AGENT_SESSION` env var), prints
 /// a message directing the user to `/design` and exits with code 1.
 pub fn run(
     description: Option<&str>,
@@ -12,23 +13,25 @@ pub fn run(
     gh_issue: Option<i64>,
     continue_slug: Option<&str>,
 ) -> Result<()> {
-    // 1. Claude Code detection
-    if std::env::var("CLAUDE_CODE").is_ok() || std::env::var("CLAUDECODE").is_ok() {
-        eprintln!("Already inside Claude Code \u{2014} use /design instead.");
+    // 1. Agent session detection
+    if std::env::var("AGENT_SESSION").is_ok() {
+        eprintln!("Already inside an agent session — use /design instead.");
         std::process::exit(1);
     }
 
-    // 2. Verify `claude` CLI is on PATH
-    let claude_available = Command::new("which")
-        .arg("claude")
+    // 2. Read agent binary from hook-config.json (default: claude)
+    let agent_binary = read_agent_binary();
+
+    // 2. Verify agent CLI is on PATH
+    let binary_available = Command::new("which")
+        .arg(&agent_binary)
         .output()
         .is_ok_and(|o| o.status.success());
 
-    if !claude_available {
+    if !binary_available {
         bail!(
-            "`claude` CLI not found. Install it:\n\n  \
-             npm install -g @anthropic-ai/claude-code\n\n  \
-             Or: brew install claude-code"
+            "`{}` CLI not found. Install it or configure a different agent via hook-config.json's `agent.binary` field.",
+            agent_binary
         );
     }
 
@@ -50,7 +53,8 @@ pub fn run(
 
     let arguments = args_parts.join(" ");
 
-    // 4. Read the /design skill template
+    // 4. Read the /design skill template for the configured agent
+    // Only the claude design doc exists currently; other agents fall back to it
     let skill_prompt = include_str!("../../resources/claude/commands/design.md");
 
     // Strip the YAML frontmatter (everything between first --- and second ---)
@@ -63,16 +67,16 @@ pub fn run(
         format!("ARGUMENTS: {arguments}\n\n{prompt_body}")
     };
 
-    // 6. Launch foreground Claude session.
-    // The `claude` CLI accepts the initial prompt as a positional argument;
-    // there is no `--prompt` flag (see issue #568).
-    let status = Command::new("claude")
+    // 6. Launch foreground agent session.
+    // The agent CLI accepts the initial prompt as a positional argument;
+    // there is no `--prompt` flag.
+    let status = Command::new(&agent_binary)
         .arg(&full_prompt)
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .status()
-        .context("Failed to launch claude session")?;
+        .context("Failed to launch agent session")?;
 
     if !status.success() {
         let code = status.code().unwrap_or(1);
@@ -80,6 +84,20 @@ pub fn run(
     }
 
     Ok(())
+}
+
+/// Read the agent binary from hook-config.json's `agent.binary` (default: "claude")
+fn read_agent_binary() -> String {
+    let config_path = Path::new(".crosslink").join("hook-config.json");
+    let content = std::fs::read_to_string(&config_path).unwrap_or_default();
+    let parsed: serde_json::Value = serde_json::from_str(&content).unwrap_or(serde_json::Value::Null);
+    parsed
+        .get("agent")
+        .and_then(|a| a.get("binary"))
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| "claude".to_string())
 }
 
 /// Strip YAML frontmatter (---\n...\n---) from the beginning of a markdown document.

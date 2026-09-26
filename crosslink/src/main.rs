@@ -1023,6 +1023,12 @@ enum ContainerCommands {
         /// Memory limit (default: auto-detect from host)
         #[arg(long)]
         memory: Option<String>,
+        /// Agent binary launched inside the container (default: `claude`)
+        #[arg(long, default_value = "claude")]
+        agent: String,
+        /// LLM model to use (provider/model format, e.g., opencode-go/deepseek-v4-flash)
+        #[arg(long, default_value = "opus")]
+        model: String,
     },
     /// List running task containers
     Ps,
@@ -1683,6 +1689,9 @@ enum KickoffCommands {
     Logs {
         /// Agent ID or branch name
         agent: String,
+        /// LLM model to use (provider/model format, e.g., opencode-go/deepseek-v4-flash)
+        #[arg(long, default_value = "opus")]
+        model: String,
         /// Number of recent events to show
         #[arg(short, long, default_value = "20")]
         lines: usize,
@@ -1694,6 +1703,9 @@ enum KickoffCommands {
         /// Force kill (SIGKILL instead of SIGTERM)
         #[arg(long)]
         force: bool,
+        /// LLM model to use (provider/model format, e.g., opencode-go/deepseek-v4-flash)
+        #[arg(long, default_value = "opus")]
+        model: String,
     },
     /// Analyze a design document against the codebase (read-only)
     Plan {

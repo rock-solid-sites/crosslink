@@ -565,6 +565,26 @@ pub(super) fn detect_linux_distro() -> LinuxDistro {
 
 /// Build a platform-specific install hint for a given command.
 pub(super) fn install_hint(cmd: &str, platform: &Platform) -> String {
+    // Handle known agent binaries with generic install hints
+    fn is_known_agent_binary(cmd: &str) -> bool {
+        matches!(
+            cmd,
+            "opencode" | "codex" | "cursor" | "windsurf" | "aider" | "zed" | "claude"
+        )
+    }
+    
+    if is_known_agent_binary(cmd) {
+        return match platform {
+            Platform::MacOS => format!(
+                "`{cmd}` CLI is not installed.\n\n  brew install {cmd}\n\n\
+                 Or install via npm:\n\n  npm install -g {cmd}"
+            ),
+            Platform::Windows | Platform::Linux(_) => format!(
+                "`{cmd}` CLI is not installed.\n\n  npm install -g {cmd}"
+            ),
+        };
+    }
+
     match cmd {
         "timeout" | "gtimeout" => match platform {
             Platform::MacOS => "On macOS, install GNU coreutils:\n\
@@ -623,15 +643,6 @@ pub(super) fn install_hint(cmd: &str, platform: &Platform) -> String {
             Platform::Windows => "`tmux` is not available on Windows.\n\
                  Use --container docker instead for containerized agent mode."
                 .to_string(),
-        },
-        "claude" => match platform {
-            Platform::MacOS => "`claude` CLI is not installed.\n\n  brew install claude-code\n\
-                 \nOr install via npm:\n\n  npm install -g @anthropic-ai/claude-code"
-                .to_string(),
-            Platform::Windows | Platform::Linux(_) => {
-                "`claude` CLI is not installed.\n\n  npm install -g @anthropic-ai/claude-code"
-                    .to_string()
-            }
         },
         "gh" => match platform {
             Platform::MacOS => {

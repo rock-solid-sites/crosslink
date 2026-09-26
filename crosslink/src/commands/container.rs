@@ -17,6 +17,8 @@ pub fn run(command: ContainerCommands) -> Result<()> {
             prompt,
             issue,
             memory,
+            agent,
+            model,
         } => {
             let path = PathBuf::from(&worktree);
             start(
@@ -25,6 +27,8 @@ pub fn run(command: ContainerCommands) -> Result<()> {
                 prompt.as_deref(),
                 issue,
                 memory.as_deref(),
+                &agent,
+                &model,
             )
         }
         ContainerCommands::Ps => ps(),
@@ -286,6 +290,8 @@ pub fn start(
     prompt_file: Option<&str>,
     issue_id: Option<i64>,
     memory: Option<&str>,
+    agent_binary: &str,
+    model: &str,
 ) -> Result<()> {
     if !docker_available() {
         bail!("Docker is not available. Install Docker and ensure the daemon is running.");
@@ -321,14 +327,14 @@ pub fn start(
     }
     let prompt = std::fs::read_to_string(&prompt_path).context("Failed to read prompt file")?;
 
-    // Resolve credentials
+    // Resolve credentials (only required for the Claude agent)
     let home = std::env::var("HOME").unwrap_or_else(|_| "/home/user".to_string());
     let credentials_path = PathBuf::from(&home)
         .join(".claude")
         .join(".credentials.json");
-    if !credentials_path.exists() {
+    if agent_binary == "claude" && !credentials_path.exists() {
         bail!(
-            "Claude credentials not found at {}. Run 'claude' to authenticate first.",
+            "Agent credentials not found at {}. Run the agent binary to authenticate first.",
             credentials_path.display()
         );
     }
@@ -415,18 +421,22 @@ pub fn start(
         ]);
     }
 
-    // Mount credentials read-only
-    cmd.args([
-        "-v",
-        &format!(
-            "{}:/host-auth/.credentials.json:ro",
-            credentials_path.display()
-        ),
-    ]);
+    // Mount credentials read-only (only for the Claude agent)
+    if agent_binary == "claude" {
+        cmd.args([
+            "-v",
+            &format!(
+                "{}:/host-auth/.credentials.json:ro",
+                credentials_path.display()
+            ),
+        ]);
+    }
 
     // Environment
     cmd.args(["-e", &format!("AGENT_ID={agent_id}")]);
-    cmd.args(["-e", "CLAUDE_CONFIG_DIR=/home/agent/.claude"]);
+    if agent_binary == "claude" {
+        cmd.args(["-e", "CLAUDE_CONFIG_DIR=/home/agent/.claude"]);
+    }
 
     // Pass host UID/GID so the entrypoint can remap the agent user to match,
     // avoiding permission issues with bind-mounted files.
@@ -450,10 +460,10 @@ pub fn start(
     // Image and command
     cmd.arg(&image);
     cmd.args([
-        "claude",
+        agent_binary,
         "--dangerously-skip-permissions",
         "--model",
-        "opus",
+        model,
         "--",
         &prompt,
     ]);
